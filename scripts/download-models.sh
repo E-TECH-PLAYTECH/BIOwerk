@@ -15,15 +15,24 @@ NC='\033[0m' # No Color
 
 # Default configuration
 DEFAULT_MODEL="phi3-mini"
-ALL_SERVICES=("osteon" "synapse" "myocyte" "nucleus" "chaperone" "circadian")
+
+# Service groups
+WORKER_SERVICES=("osteon" "synapse" "myocyte" "nucleus" "chaperone" "circadian")
+STOOGE_SERVICES=("larry" "moe" "harry")  # The 3 Stooges!
+ALL_SERVICES=("${WORKER_SERVICES[@]}" "${STOOGE_SERVICES[@]}")
 
 # Model registry - maps friendly names to HuggingFace repo and file
 declare -A MODEL_REGISTRY
+MODEL_REGISTRY["phi2"]="microsoft/phi-2:phi-2.Q4_K_M.gguf"
 MODEL_REGISTRY["phi3-mini"]="microsoft/Phi-3-mini-4k-instruct-gguf:Phi-3-mini-4k-instruct-q4.gguf"
 MODEL_REGISTRY["phi3"]="microsoft/Phi-3-mini-4k-instruct-gguf:Phi-3-mini-4k-instruct-q4.gguf"
 MODEL_REGISTRY["llama3.2"]="hugging-quants/Llama-3.2-3B-Instruct-Q4_K_M-GGUF:llama-3.2-3b-instruct-q4_k_m.gguf"
 MODEL_REGISTRY["mistral"]="TheBloke/Mistral-7B-Instruct-v0.2-GGUF:mistral-7b-instruct-v0.2.Q4_K_M.gguf"
 MODEL_REGISTRY["qwen2.5"]="Qwen/Qwen2.5-7B-Instruct-GGUF:qwen2.5-7b-instruct-q4_k_m.gguf"
+
+# Special shortcuts
+MODEL_REGISTRY["stooges"]="phi2"  # Install phi2 to the 3 stooges
+MODEL_REGISTRY["workers"]="phi3-mini"  # Install phi3-mini to worker services
 
 echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}  BIOwerk Model Download & Installation${NC}"
@@ -35,9 +44,22 @@ MODEL_NAME="${1:-$DEFAULT_MODEL}"
 shift || true
 SERVICES=("$@")
 
-# If no services specified, use all
-if [ ${#SERVICES[@]} -eq 0 ]; then
-    SERVICES=("${ALL_SERVICES[@]}")
+# Handle special shortcuts
+if [ "$MODEL_NAME" == "stooges" ]; then
+    MODEL_NAME="phi2"
+    if [ ${#SERVICES[@]} -eq 0 ]; then
+        SERVICES=("${STOOGE_SERVICES[@]}")
+    fi
+elif [ "$MODEL_NAME" == "workers" ]; then
+    MODEL_NAME="phi3-mini"
+    if [ ${#SERVICES[@]} -eq 0 ]; then
+        SERVICES=("${WORKER_SERVICES[@]}")
+    fi
+else
+    # If no services specified, use all
+    if [ ${#SERVICES[@]} -eq 0 ]; then
+        SERVICES=("${ALL_SERVICES[@]}")
+    fi
 fi
 
 # Validate model name
