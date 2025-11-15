@@ -158,3 +158,9 @@ async def mesh_server(agent_server, tls_materials, monkeypatch):
     port = _get_free_port()
     async with _run_uvicorn(mesh_module.app, "127.0.0.1", port, ssl_context=tls_materials.ssl_context) as url:
         yield url
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))

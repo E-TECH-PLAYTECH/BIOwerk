@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
 import os, httpx, time
 from matrix.models import Msg, Reply
 from matrix.utils import state_hash
@@ -40,6 +41,9 @@ async def route(agent: str, endpoint: str, request: Request):
             return JSONResponse(status_code=exc.response.status_code, content=content)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, json=msg.model_dump())
+        r.raise_for_status()
         return r.json()
 
 @app.get("/health")
