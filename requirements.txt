@@ -24,3 +24,4 @@ bcrypt==4.2.1
 # LLM Provider SDKs
 openai==1.58.1
 anthropic==0.39.0
+ollama==0.4.4

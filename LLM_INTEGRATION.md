@@ -2,22 +2,29 @@
 
 ## Overview
 
-This document describes the integration of real LLM providers (OpenAI and Anthropic Claude) into the BIOwerk system, replacing all mock implementations with actual AI-powered business logic.
+This document describes the integration of real LLM providers into the BIOwerk system, replacing all mock implementations with actual AI-powered business logic.
+
+**Supported Providers:**
+- ✅ **OpenAI** (GPT-4, GPT-4o) - Cloud, high quality
+- ✅ **Anthropic Claude** (Claude 3.5 Sonnet) - Cloud, high quality
+- ✅ **DeepSeek** (DeepSeek-Chat) - Cloud, cost-effective
+- ✅ **Ollama** (Phi-3, Llama, Mistral, etc.) - **Local, FREE, Open-Source**
 
 ## Changes Summary
 
 ### 1. Dependencies Added
 
 **requirements.txt:**
-- `openai==1.58.1` - OpenAI SDK for GPT models
+- `openai==1.58.1` - OpenAI SDK for GPT models (also used for DeepSeek)
 - `anthropic==0.39.0` - Anthropic SDK for Claude models
+- `ollama==0.4.4` - Ollama SDK for local open-source models
 
 ### 2. Configuration
 
 **Environment Variables (.env.example):**
 ```bash
 # LLM Provider Configuration
-LLM_PROVIDER=openai                          # Primary provider: 'openai' or 'anthropic'
+LLM_PROVIDER=ollama  # 'openai', 'anthropic', 'deepseek', or 'ollama'
 
 # OpenAI Configuration
 OPENAI_API_KEY=your-openai-api-key-here
@@ -32,22 +39,41 @@ ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 ANTHROPIC_MAX_TOKENS=4096
 ANTHROPIC_TEMPERATURE=0.7
 ANTHROPIC_TIMEOUT=60
+
+# DeepSeek Configuration
+DEEPSEEK_API_KEY=your-deepseek-api-key-here
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MAX_TOKENS=4096
+DEEPSEEK_TEMPERATURE=0.7
+DEEPSEEK_TIMEOUT=60
+
+# Ollama Configuration (Local/Open-Source LLMs)
+OLLAMA_BASE_URL=http://ollama:11434
+OLLAMA_MODEL=phi3:mini  # phi3:mini, llama3.2, mistral, qwen2.5:7b, etc.
+OLLAMA_MAX_TOKENS=4096
+OLLAMA_TEMPERATURE=0.7
+OLLAMA_TIMEOUT=120
 ```
 
 **Settings (matrix/config.py):**
 - Added LLM provider configuration fields
 - Added OpenAI configuration fields
 - Added Anthropic configuration fields
+- Added DeepSeek configuration fields
+- Added Ollama configuration fields
 
 ### 3. LLM Client Utility (matrix/llm_client.py)
 
 **Features:**
-- Unified interface for both OpenAI and Anthropic APIs
+- Unified interface for OpenAI, Anthropic, DeepSeek, and Ollama APIs
 - Async support for all LLM calls
 - Automatic provider selection based on configuration
 - JSON mode support for structured outputs
 - Comprehensive error handling and logging
 - Token usage tracking
+- Automatic model pulling for Ollama (if model not found)
+- Support for local, privacy-preserving inference via Ollama
 
 **Key Methods:**
 ```python
@@ -301,20 +327,66 @@ curl -X POST http://localhost:8080/nucleus/plan \
   -d '{"id":"test-5","input":{"goal":"Create quarterly report"}}'
 ```
 
+## Provider Comparison
+
+| Provider | Cost | Quality | Speed | Privacy | Setup | Best For |
+|----------|------|---------|-------|---------|-------|----------|
+| **Ollama** (phi3:mini) | 🟢 FREE | ⭐⭐⭐⭐ | ⚡⚡⚡ | 🔒 100% | Easy | **Development, Privacy** |
+| **Ollama** (mistral 7B) | 🟢 FREE | ⭐⭐⭐⭐⭐ | ⚡⚡ | 🔒 100% | Easy | **Production (self-hosted)** |
+| **DeepSeek** | 🟡 $0.14/1M | ⭐⭐⭐⭐ | ⚡⚡⚡ | ⚠️ Cloud | Easy | **Cost-effective production** |
+| **OpenAI GPT-4o** | 🔴 $2.50/1M | ⭐⭐⭐⭐⭐ | ⚡⚡⚡ | ⚠️ Cloud | Easy | **High-quality critical tasks** |
+| **Claude 3.5 Sonnet** | 🔴 $3/1M | ⭐⭐⭐⭐⭐ | ⚡⚡ | ⚠️ Cloud | Easy | **Complex reasoning** |
+
+**Recommended Setup:**
+- **Development**: Ollama (phi3:mini) - Fast, free, local
+- **Production (Small)**: Ollama (mistral) - Free, self-hosted
+- **Production (Large)**: DeepSeek - Cost-effective cloud
+- **Critical/Enterprise**: OpenAI or Claude - Best quality
+
+### Quick Start with Ollama (FREE & Local)
+
+1. **Start system with Ollama:**
+```bash
+docker compose up -d
+```
+
+2. **Pull model (done automatically on first use):**
+```bash
+./scripts/pull-ollama-model.sh phi3:mini
+```
+
+3. **Test it:**
+```bash
+curl -X POST http://localhost:8080/osteon/outline \
+  -H "Content-Type: application/json" \
+  -d '{"id":"test","input":{"topic":"Machine Learning"}}'
+```
+
+See **[OLLAMA_SETUP.md](OLLAMA_SETUP.md)** for detailed Ollama documentation.
+
 ## Performance Considerations
 
 1. **Token Limits:** Configured per provider (default 4096)
-2. **Timeouts:** 60 seconds per request (configurable)
-3. **Rate Limits:** Respect provider rate limits
+2. **Timeouts:** 60-120 seconds per request (configurable)
+3. **Rate Limits:** Respect provider rate limits (not applicable to Ollama)
 4. **Caching:** Consider implementing response caching for repeated requests
 5. **Async Operations:** All LLM calls are async for better performance
+6. **GPU Acceleration:** Use GPU for Ollama in production (see OLLAMA_SETUP.md)
 
 ## Cost Management
 
+### With Cloud Providers
 - Monitor token usage via logs
 - Adjust `max_tokens` and `temperature` per use case
 - Consider using different models for different complexity levels
 - Implement caching strategies for common requests
+
+### With Ollama (Recommended)
+- ✅ **Zero ongoing costs** - Completely free after setup
+- ✅ **No rate limits** - Unlimited requests
+- ✅ **Full privacy** - Data stays on your servers
+- ✅ **Predictable costs** - Only hardware costs
+- Use DeepSeek as fallback for complex tasks
 
 ## Future Enhancements
 

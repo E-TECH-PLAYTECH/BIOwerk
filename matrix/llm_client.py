@@ -1,15 +1,16 @@
-"""LLM client utility for unified access to OpenAI and Anthropic APIs."""
+"""LLM client utility for unified access to OpenAI, Anthropic, DeepSeek, and Ollama APIs."""
 import logging
 from typing import Optional, List, Dict, Any
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
+import ollama
 from matrix.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Unified LLM client supporting OpenAI and Anthropic."""
+    """Unified LLM client supporting OpenAI, Anthropic, DeepSeek, and Ollama."""
 
     def __init__(self):
         """Initialize LLM clients based on configuration."""
@@ -33,6 +34,19 @@ class LLMClient:
         else:
             self.anthropic_client = None
 
+        # Initialize DeepSeek client (uses OpenAI SDK with custom base URL)
+        if settings.deepseek_api_key:
+            self.deepseek_client = AsyncOpenAI(
+                api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url,
+                timeout=settings.deepseek_timeout
+            )
+        else:
+            self.deepseek_client = None
+
+        # Initialize Ollama client
+        self.ollama_client = ollama.AsyncClient(host=settings.ollama_base_url)
+
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -51,9 +65,9 @@ class LLMClient:
             system_prompt: Optional system prompt (overrides messages system if provided)
             temperature: Sampling temperature (uses config default if None)
             max_tokens: Maximum tokens to generate (uses config default if None)
-            provider: Override default provider ('openai' or 'anthropic')
+            provider: Override default provider ('openai', 'anthropic', 'deepseek', or 'ollama')
             model: Override default model
-            json_mode: Enable JSON response mode (OpenAI only)
+            json_mode: Enable JSON response mode
 
         Returns:
             Generated text response
@@ -72,6 +86,14 @@ class LLMClient:
             elif provider == "anthropic":
                 return await self._anthropic_completion(
                     messages, system_prompt, temperature, max_tokens, model
+                )
+            elif provider == "deepseek":
+                return await self._deepseek_completion(
+                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                )
+            elif provider == "ollama":
+                return await self._ollama_completion(
+                    messages, system_prompt, temperature, max_tokens, model, json_mode
                 )
             else:
                 raise ValueError(f"Invalid LLM provider: {provider}")
@@ -156,6 +178,106 @@ class LLMClient:
 
         return content
 
+    async def _deepseek_completion(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        model: Optional[str],
+        json_mode: bool
+    ) -> str:
+        """Generate completion using DeepSeek API (OpenAI-compatible)."""
+        if not self.deepseek_client:
+            raise ValueError("DeepSeek client not configured. Set DEEPSEEK_API_KEY in environment.")
+
+        # Prepare messages
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+        formatted_messages.extend(messages)
+
+        # Prepare parameters
+        params = {
+            "model": model or settings.deepseek_model,
+            "messages": formatted_messages,
+            "temperature": temperature if temperature is not None else settings.deepseek_temperature,
+            "max_tokens": max_tokens or settings.deepseek_max_tokens
+        }
+
+        if json_mode:
+            params["response_format"] = {"type": "json_object"}
+
+        logger.info(f"Calling DeepSeek API with model {params['model']}")
+
+        response = await self.deepseek_client.chat.completions.create(**params)
+        content = response.choices[0].message.content
+
+        logger.info(f"DeepSeek API call successful. Tokens used: {response.usage.total_tokens}")
+
+        return content
+
+    async def _ollama_completion(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        model: Optional[str],
+        json_mode: bool
+    ) -> str:
+        """Generate completion using Ollama (local/open-source LLMs)."""
+        # Prepare messages
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+        formatted_messages.extend(messages)
+
+        # Prepare options
+        options = {
+            "temperature": temperature if temperature is not None else settings.ollama_temperature,
+            "num_predict": max_tokens or settings.ollama_max_tokens,
+        }
+
+        model_name = model or settings.ollama_model
+
+        logger.info(f"Calling Ollama API with model {model_name}")
+
+        try:
+            response = await self.ollama_client.chat(
+                model=model_name,
+                messages=formatted_messages,
+                options=options,
+                format="json" if json_mode else None
+            )
+
+            content = response['message']['content']
+
+            logger.info(f"Ollama API call successful with model {model_name}")
+
+            return content
+
+        except Exception as e:
+            logger.error(f"Ollama API call failed: {str(e)}")
+            # If model not found, try to pull it
+            if "not found" in str(e).lower():
+                logger.info(f"Model {model_name} not found. Attempting to pull...")
+                try:
+                    await self.ollama_client.pull(model_name)
+                    logger.info(f"Model {model_name} pulled successfully. Retrying request...")
+                    # Retry the request
+                    response = await self.ollama_client.chat(
+                        model=model_name,
+                        messages=formatted_messages,
+                        options=options,
+                        format="json" if json_mode else None
+                    )
+                    return response['message']['content']
+                except Exception as pull_error:
+                    logger.error(f"Failed to pull model {model_name}: {str(pull_error)}")
+                    raise ValueError(f"Ollama model {model_name} not available and pull failed: {str(pull_error)}")
+            raise
+
     async def generate_json(
         self,
         prompt: str,
@@ -175,8 +297,9 @@ class LLMClient:
         """
         messages = [{"role": "user", "content": prompt}]
 
-        # For OpenAI, use JSON mode; for Anthropic, rely on system prompt
-        if (provider or self.provider) == "openai":
+        # For OpenAI and DeepSeek, use JSON mode; for others, rely on system prompt
+        effective_provider = provider or self.provider
+        if effective_provider in ["openai", "deepseek", "ollama"]:
             return await self.chat_completion(
                 messages=messages,
                 system_prompt=system_prompt,

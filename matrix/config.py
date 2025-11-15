@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     require_auth: bool = Field(default=False, description="Require authentication for all endpoints")
 
     # LLM Provider Configuration
-    llm_provider: str = Field(default="openai", description="Primary LLM provider: 'openai' or 'anthropic'")
+    llm_provider: str = Field(default="ollama", description="Primary LLM provider: 'openai', 'anthropic', 'deepseek', or 'ollama'")
 
     # OpenAI Configuration
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
@@ -59,6 +59,21 @@ class Settings(BaseSettings):
     anthropic_max_tokens: int = Field(default=4096, description="Anthropic max tokens")
     anthropic_temperature: float = Field(default=0.7, description="Anthropic temperature")
     anthropic_timeout: int = Field(default=60, description="Anthropic API timeout in seconds")
+
+    # DeepSeek Configuration
+    deepseek_api_key: Optional[str] = Field(default=None, description="DeepSeek API key")
+    deepseek_model: str = Field(default="deepseek-chat", description="DeepSeek model to use")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com", description="DeepSeek API base URL")
+    deepseek_max_tokens: int = Field(default=4096, description="DeepSeek max tokens")
+    deepseek_temperature: float = Field(default=0.7, description="DeepSeek temperature")
+    deepseek_timeout: int = Field(default=60, description="DeepSeek API timeout in seconds")
+
+    # Ollama Configuration (Local/Open-Source LLMs)
+    ollama_base_url: str = Field(default="http://ollama:11434", description="Ollama server URL")
+    ollama_model: str = Field(default="phi3:mini", description="Ollama model to use (phi3:mini, llama3.2, mistral, etc.)")
+    ollama_max_tokens: int = Field(default=4096, description="Ollama max tokens")
+    ollama_temperature: float = Field(default=0.7, description="Ollama temperature")
+    ollama_timeout: int = Field(default=120, description="Ollama API timeout in seconds")
 
     class Config:
         env_file = ".env"
