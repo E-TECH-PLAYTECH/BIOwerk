@@ -1,3 +1,5 @@
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request
 import os, httpx, time
 from matrix.models import Msg, Reply
@@ -22,6 +24,23 @@ async def route(agent: str, endpoint: str, request: Request):
     if not target_base:
         return {"error": f"unknown agent {agent}"}
     url = f"{target_base}/{endpoint}"
+    headers = {}
+    auth_header = request.headers.get("authorization")
+    if auth_header:
+        headers["Authorization"] = auth_header
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            r = await client.post(url, json=msg.model_dump(), headers=headers or None)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            try:
+                content = exc.response.json()
+            except ValueError:
+                content = {"detail": exc.response.text}
+            return JSONResponse(status_code=exc.response.status_code, content=content)
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(url, json=msg.model_dump())
         r.raise_for_status()
