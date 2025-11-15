@@ -1,3 +1,11 @@
+from fastapi import FastAPI, Request
+import os, httpx, time
+from matrix.models import Msg, Reply
+from matrix.observability import setup_instrumentation
+from matrix.utils import state_hash
+
+app = FastAPI(title="Mesh Gateway")
+setup_instrumentation(app)
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi import FastAPI, Request

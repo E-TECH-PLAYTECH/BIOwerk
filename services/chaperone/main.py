@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from matrix.models import Msg, Reply
+from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 import time
 
 app = FastAPI(title="Chaperone")
+setup_instrumentation(app)
 
 @app.post("/import_artifact", response_model=Reply)
 def import_artifact(msg: Msg):

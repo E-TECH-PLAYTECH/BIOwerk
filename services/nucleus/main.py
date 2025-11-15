@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from matrix.models import Msg, Reply
+from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 import time, httpx
 
 app = FastAPI(title="Nucleus")
+setup_instrumentation(app)
 
 AGENTS = {
     "osteon": "http://mesh:8080/osteon",

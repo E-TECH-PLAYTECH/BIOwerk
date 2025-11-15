@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from matrix.models import Msg, Reply
+from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 import time
 
 app = FastAPI(title="Synapse")
+setup_instrumentation(app)
 
 @app.post("/storyboard", response_model=Reply)
 def storyboard(msg: Msg):
