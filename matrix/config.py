@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     require_auth: bool = Field(default=False, description="Require authentication for all endpoints")
 
     # LLM Provider Configuration
-    llm_provider: str = Field(default="ollama", description="Primary LLM provider: 'openai', 'anthropic', 'deepseek', or 'ollama'")
+    llm_provider: str = Field(default="ollama", description="Primary LLM provider: 'openai', 'anthropic', 'deepseek', 'ollama', or 'local'")
 
     # OpenAI Configuration
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
@@ -74,6 +74,15 @@ class Settings(BaseSettings):
     ollama_max_tokens: int = Field(default=4096, description="Ollama max tokens")
     ollama_temperature: float = Field(default=0.7, description="Ollama temperature")
     ollama_timeout: int = Field(default=120, description="Ollama API timeout in seconds")
+
+    # Local Model Configuration (Standalone GGUF files)
+    local_model_path: str = Field(default="./models", description="Path to local models directory")
+    local_model_name: str = Field(default="phi3-mini", description="Local model name (subdirectory in models/)")
+    local_model_file: str = Field(default="model.gguf", description="Model file name within model directory")
+    local_max_tokens: int = Field(default=4096, description="Local model max tokens")
+    local_temperature: float = Field(default=0.7, description="Local model temperature")
+    local_context_size: int = Field(default=4096, description="Local model context window size")
+    local_gpu_layers: int = Field(default=0, description="Number of layers to offload to GPU (0=CPU only)")
 
     class Config:
         env_file = ".env"
