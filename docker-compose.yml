@@ -1,7 +1,58 @@
 version: "3.9"
 services:
+  # Database Services
+  postgres:
+    image: postgres:16-alpine
+    container_name: biowerk-postgres
+    environment:
+      POSTGRES_USER: biowerk
+      POSTGRES_PASSWORD: biowerk_dev_password
+      POSTGRES_DB: biowerk
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biowerk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7.0
+    container_name: biowerk-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: biowerk
+      MONGO_INITDB_ROOT_PASSWORD: biowerk_dev_password
+      MONGO_INITDB_DATABASE: biowerk
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: biowerk-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Application Services
   mesh:
     build: ./mesh
+    container_name: biowerk-mesh
     ports: ["8080:8080"]
     environment:
       - AGENT_OSTEON_URL=http://osteon:8001
@@ -10,22 +61,129 @@ services:
       - AGENT_CIRCADIAN_URL=http://circadian:8004
       - AGENT_NUCLEUS_URL=http://nucleus:8005
       - AGENT_CHAPERONE_URL=http://chaperone:8006
-    depends_on: [osteon, myocyte, synapse, circadian, nucleus, chaperone]
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      osteon:
+        condition: service_started
+      myocyte:
+        condition: service_started
+      synapse:
+        condition: service_started
+      circadian:
+        condition: service_started
+      nucleus:
+        condition: service_started
+      chaperone:
+        condition: service_started
+
   osteon:
     build: ./services/osteon
+    container_name: biowerk-osteon
     ports: ["8001:8001"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   myocyte:
     build: ./services/myocyte
+    container_name: biowerk-myocyte
     ports: ["8002:8002"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   synapse:
     build: ./services/synapse
+    container_name: biowerk-synapse
     ports: ["8003:8003"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   circadian:
     build: ./services/circadian
+    container_name: biowerk-circadian
     ports: ["8004:8004"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   nucleus:
     build: ./services/nucleus
+    container_name: biowerk-nucleus
     ports: ["8005:8005"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   chaperone:
     build: ./services/chaperone
+    container_name: biowerk-chaperone
     ports: ["8006:8006"]
+    environment:
+      - POSTGRES_HOST=postgres
+      - MONGO_HOST=mongodb
+      - REDIS_HOST=redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
