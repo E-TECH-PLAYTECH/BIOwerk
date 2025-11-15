@@ -43,6 +43,23 @@ class Settings(BaseSettings):
     api_key_header: str = Field(default="X-API-Key", description="API key header name")
     require_auth: bool = Field(default=False, description="Require authentication for all endpoints")
 
+    # LLM Provider Configuration
+    llm_provider: str = Field(default="openai", description="Primary LLM provider: 'openai' or 'anthropic'")
+
+    # OpenAI Configuration
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
+    openai_model: str = Field(default="gpt-4o", description="OpenAI model to use")
+    openai_max_tokens: int = Field(default=4096, description="OpenAI max tokens")
+    openai_temperature: float = Field(default=0.7, description="OpenAI temperature")
+    openai_timeout: int = Field(default=60, description="OpenAI API timeout in seconds")
+
+    # Anthropic Configuration
+    anthropic_api_key: Optional[str] = Field(default=None, description="Anthropic API key")
+    anthropic_model: str = Field(default="claude-3-5-sonnet-20241022", description="Anthropic model to use")
+    anthropic_max_tokens: int = Field(default=4096, description="Anthropic max tokens")
+    anthropic_temperature: float = Field(default=0.7, description="Anthropic temperature")
+    anthropic_timeout: int = Field(default=60, description="Anthropic API timeout in seconds")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

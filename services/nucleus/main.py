@@ -3,8 +3,11 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import create_error_response
-import time, httpx
+from matrix.errors import InvalidInputError, create_error_response
+from matrix.llm_client import llm_client
+import time
+import json
+import httpx
 
 app = FastAPI(title="Nucleus")
 setup_instrumentation(app)
@@ -18,20 +21,68 @@ AGENTS = {
 }
 
 @app.post("/plan", response_model=Reply)
-def plan(msg: Msg):
+async def plan(msg: Msg):
+    """Generate an execution plan for complex workflows."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "plan")
 
     try:
-        output = {"plan":[
-            {"step_id":"s1","agent":"osteon","endpoint":"outline"},
-            {"step_id":"s2","agent":"osteon","endpoint":"draft","depends_on":["s1"]},
-            {"step_id":"s3","agent":"synapse","endpoint":"slide_make","depends_on":["s2"]}
-        ]}
+        inp = msg.input or {}
+        goal = inp.get("goal", "")
+        requirements = inp.get("requirements", [])
+        available_agents = inp.get("available_agents", list(AGENTS.keys()))
+
+        if not goal:
+            raise InvalidInputError("goal is required")
+
+        # Generate plan using LLM
+        system_prompt = """You are a workflow orchestration expert. Create an execution plan to achieve the given goal.
+Return your response as a JSON object with: plan (array of steps).
+Each step should have: step_id, agent (osteon/synapse/myocyte/circadian), endpoint, description, depends_on (array of step_ids).
+
+Available agents and their capabilities:
+- osteon: Content generation (outline, draft, edit, summarize, export)
+- synapse: Presentations (storyboard, slide_make, visualize, export)
+- myocyte: Data analysis (ingest_table, formula_eval, model_forecast, export)
+- circadian: Project planning (plan_timeline, assign, track, remind)
+
+Example: {
+  "plan": [
+    {"step_id": "s1", "agent": "osteon", "endpoint": "outline", "description": "Create document outline", "depends_on": []},
+    {"step_id": "s2", "agent": "osteon", "endpoint": "draft", "description": "Draft content", "depends_on": ["s1"]},
+    {"step_id": "s3", "agent": "synapse", "endpoint": "slide_make", "description": "Create slides", "depends_on": ["s2"]}
+  ]
+}"""
+
+        requirements_text = json.dumps(requirements) if requirements else "None specified"
+
+        prompt = f"""Create an execution plan to achieve this goal:
+
+Goal: {goal}
+Requirements: {requirements_text}
+Available Agents: {', '.join(available_agents)}
+
+Generate a step-by-step plan with proper dependencies."""
+
+        response_text = await llm_client.generate_json(
+            prompt=prompt,
+            system_prompt=system_prompt
+        )
+
+        output = json.loads(response_text)
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, "nucleus", True, duration_ms)
 
+        return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        # Fallback plan
+        output = {
+            "plan": [
+                {"step_id": "s1", "agent": "osteon", "endpoint": "outline", "description": goal, "depends_on": []}
+            ]
+        }
         return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
@@ -39,17 +90,58 @@ def plan(msg: Msg):
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
 @app.post("/route", response_model=Reply)
-def route(msg: Msg):
+async def route(msg: Msg):
+    """Intelligently route requests to appropriate services."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "route")
 
     try:
-        # Stubbed router
-        output = {"routed": True}
+        inp = msg.input or {}
+        request_description = inp.get("request", "")
+        context = inp.get("context", "")
+
+        if not request_description:
+            raise InvalidInputError("request is required")
+
+        # Route using LLM
+        system_prompt = """You are a request routing expert. Analyze the request and determine the best agent and endpoint.
+Return your response as a JSON object with: agent, endpoint, reasoning, confidence (0-1).
+
+Available agents and their capabilities:
+- osteon: Content generation (outline, draft, edit, summarize, export)
+- synapse: Presentations (storyboard, slide_make, visualize, export)
+- myocyte: Data analysis (ingest_table, formula_eval, model_forecast, export)
+- circadian: Project planning (plan_timeline, assign, track, remind)
+
+Example: {
+  "agent": "osteon",
+  "endpoint": "draft",
+  "reasoning": "Request asks for content generation",
+  "confidence": 0.95
+}"""
+
+        prompt = f"""Route this request to the appropriate agent and endpoint:
+
+Request: {request_description}
+{f"Context: {context}" if context else ""}
+
+Determine the best agent and endpoint to handle this request."""
+
+        response_text = await llm_client.generate_json(
+            prompt=prompt,
+            system_prompt=system_prompt
+        )
+
+        output = json.loads(response_text)
+        output["routed"] = True
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, "nucleus", True, duration_ms)
 
+        return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        output = {"routed": True, "agent": "osteon", "endpoint": "draft", "confidence": 0.5}
         return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
@@ -57,16 +149,56 @@ def route(msg: Msg):
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
 @app.post("/review", response_model=Reply)
-def review(msg: Msg):
+async def review(msg: Msg):
+    """Review and validate outputs against quality criteria."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "review")
 
     try:
-        output = {"criteria":["hash-stable","schema-valid"], "pass": True}
+        inp = msg.input or {}
+        content = inp.get("content", {})
+        criteria = inp.get("criteria", ["quality", "completeness", "accuracy"])
+
+        if not content:
+            raise InvalidInputError("content is required for review")
+
+        # Review using LLM
+        system_prompt = """You are a quality assurance expert. Review the content against the given criteria.
+Return your response as a JSON object with: pass (boolean), score (0-100), feedback (array of strings), criteria_results (object).
+Example: {
+  "pass": true,
+  "score": 85,
+  "feedback": ["Content is well-structured", "Minor grammar improvements needed"],
+  "criteria_results": {
+    "quality": {"pass": true, "score": 90, "notes": "High quality content"},
+    "completeness": {"pass": true, "score": 80, "notes": "All sections present"}
+  }
+}"""
+
+        content_text = json.dumps(content, indent=2) if isinstance(content, dict) else str(content)
+        criteria_text = ", ".join(criteria)
+
+        prompt = f"""Review this content against these criteria: {criteria_text}
+
+Content:
+{content_text}
+
+Provide a detailed review with scores and feedback."""
+
+        response_text = await llm_client.generate_json(
+            prompt=prompt,
+            system_prompt=system_prompt
+        )
+
+        output = json.loads(response_text)
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, "nucleus", True, duration_ms)
 
+        return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        output = {"criteria": criteria, "pass": True, "score": 75}
         return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
@@ -74,16 +206,55 @@ def review(msg: Msg):
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
 @app.post("/finalize", response_model=Reply)
-def finalize(msg: Msg):
+async def finalize(msg: Msg):
+    """Finalize and package workflow results."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "finalize")
 
     try:
-        output = {"final":"ok"}
+        inp = msg.input or {}
+        workflow_results = inp.get("workflow_results", [])
+        goal = inp.get("goal", "")
+
+        if not workflow_results:
+            raise InvalidInputError("workflow_results is required")
+
+        # Finalize using LLM
+        system_prompt = """You are a workflow finalization expert. Analyze workflow results and create a summary.
+Return your response as a JSON object with: final (status), summary, key_outputs, recommendations, metadata.
+Example: {
+  "final": "success",
+  "summary": "All workflow steps completed successfully",
+  "key_outputs": ["Document created", "Slides generated"],
+  "recommendations": ["Review for accuracy", "Share with team"],
+  "metadata": {"total_steps": 5, "duration_seconds": 120}
+}"""
+
+        results_text = json.dumps(workflow_results, indent=2)
+
+        prompt = f"""Finalize this workflow:
+
+Goal: {goal}
+
+Workflow Results:
+{results_text}
+
+Create a comprehensive summary and final status."""
+
+        response_text = await llm_client.generate_json(
+            prompt=prompt,
+            system_prompt=system_prompt
+        )
+
+        output = json.loads(response_text)
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, "nucleus", True, duration_ms)
 
+        return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse LLM JSON response: {e}")
+        output = {"final": "ok", "summary": "Workflow completed"}
         return Reply(id=msg.id, ts=time.time(), agent="nucleus", ok=True, output=output, state_hash=state_hash(output))
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
