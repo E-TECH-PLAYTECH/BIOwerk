@@ -49,6 +49,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # LLM Services
+  ollama:
+    image: ollama/ollama:latest
+    container_name: biowerk-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   # Application Services
   mesh:
     build: ./mesh
@@ -92,12 +107,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   myocyte:
@@ -108,12 +130,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   synapse:
@@ -124,12 +153,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   circadian:
@@ -140,12 +176,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   nucleus:
@@ -156,12 +199,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
   chaperone:
@@ -172,12 +222,19 @@ services:
       - POSTGRES_HOST=postgres
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
 
 volumes:
@@ -186,4 +243,6 @@ volumes:
   mongodb_data:
     driver: local
   redis_data:
+    driver: local
+  ollama_data:
     driver: local
