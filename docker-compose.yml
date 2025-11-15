@@ -1,0 +1,31 @@
+version: "3.9"
+services:
+  mesh:
+    build: ./mesh
+    ports: ["8080:8080"]
+    environment:
+      - AGENT_OSTEON_URL=http://osteon:8001
+      - AGENT_MYOCYTE_URL=http://myocyte:8002
+      - AGENT_SYNAPSE_URL=http://synapse:8003
+      - AGENT_CIRCADIAN_URL=http://circadian:8004
+      - AGENT_NUCLEUS_URL=http://nucleus:8005
+      - AGENT_CHAPERONE_URL=http://chaperone:8006
+    depends_on: [osteon, myocyte, synapse, circadian, nucleus, chaperone]
+  osteon:
+    build: ./services/osteon
+    ports: ["8001:8001"]
+  myocyte:
+    build: ./services/myocyte
+    ports: ["8002:8002"]
+  synapse:
+    build: ./services/synapse
+    ports: ["8003:8003"]
+  circadian:
+    build: ./services/circadian
+    ports: ["8004:8004"]
+  nucleus:
+    build: ./services/nucleus
+    ports: ["8005:8005"]
+  chaperone:
+    build: ./services/chaperone
+    ports: ["8006:8006"]
