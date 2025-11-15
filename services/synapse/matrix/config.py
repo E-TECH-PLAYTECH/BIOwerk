@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
     environment: str = Field(default="development", description="Environment (development, staging, production)")
 
+    # Authentication Configuration
+    jwt_secret_key: str = Field(default="dev-secret-key-change-in-production", description="JWT secret key")
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_access_token_expire_minutes: int = Field(default=30, description="Access token expiration in minutes")
+    jwt_refresh_token_expire_days: int = Field(default=7, description="Refresh token expiration in days")
+    api_key_header: str = Field(default="X-API-Key", description="API key header name")
+    require_auth: bool = Field(default=False, description="Require authentication for all endpoints")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
