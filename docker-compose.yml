@@ -237,6 +237,71 @@ services:
       ollama:
         condition: service_healthy
 
+  # The 3 Stooges - PHI2 Coordinators
+  larry:
+    build: ./services/larry
+    container_name: biowerk-larry
+    ports: ["8007:8007"]
+    environment:
+      - LLM_PROVIDER=local
+      - LOCAL_MODEL_PATH=./models
+      - LOCAL_MODEL_NAME=phi2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  moe:
+    build: ./services/moe
+    container_name: biowerk-moe
+    ports: ["8008:8008"]
+    environment:
+      - LLM_PROVIDER=local
+      - LOCAL_MODEL_PATH=./models
+      - LOCAL_MODEL_NAME=phi2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      osteon:
+        condition: service_started
+      myocyte:
+        condition: service_started
+      synapse:
+        condition: service_started
+
+  harry:
+    build: ./services/harry
+    container_name: biowerk-harry
+    ports: ["8009:8009"]
+    environment:
+      - LLM_PROVIDER=local
+      - LOCAL_MODEL_PATH=./models
+      - LOCAL_MODEL_NAME=phi2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      osteon:
+        condition: service_started
+      myocyte:
+        condition: service_started
+      synapse:
+        condition: service_started
+      larry:
+        condition: service_started
+      moe:
+        condition: service_started
+
 volumes:
   postgres_data:
     driver: local

@@ -1,5 +1,7 @@
-"""LLM client utility for unified access to OpenAI, Anthropic, DeepSeek, and Ollama APIs."""
+"""LLM client utility for unified access to OpenAI, Anthropic, DeepSeek, Ollama, and Local models."""
 import logging
+import os
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -8,9 +10,17 @@ from matrix.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Optional: Import llama-cpp-python for local models
+try:
+    from llama_cpp import Llama
+    LLAMA_CPP_AVAILABLE = True
+except ImportError:
+    LLAMA_CPP_AVAILABLE = False
+    logger.warning("llama-cpp-python not installed. Local model support disabled. Install with: pip install llama-cpp-python")
+
 
 class LLMClient:
-    """Unified LLM client supporting OpenAI, Anthropic, DeepSeek, and Ollama."""
+    """Unified LLM client supporting OpenAI, Anthropic, DeepSeek, Ollama, and Local models."""
 
     def __init__(self):
         """Initialize LLM clients based on configuration."""
@@ -47,6 +57,34 @@ class LLMClient:
         # Initialize Ollama client
         self.ollama_client = ollama.AsyncClient(host=settings.ollama_base_url)
 
+        # Initialize Local model client
+        self.local_model = None
+        if self.provider == "local" and LLAMA_CPP_AVAILABLE:
+            self._load_local_model()
+
+    def _load_local_model(self):
+        """Load local GGUF model from disk."""
+        model_path = Path(settings.local_model_path) / settings.local_model_name / settings.local_model_file
+
+        if not model_path.exists():
+            logger.error(f"Local model not found at: {model_path}")
+            logger.error("Please download models using: ./scripts/download-models.sh")
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+
+        logger.info(f"Loading local model from: {model_path}")
+
+        try:
+            self.local_model = Llama(
+                model_path=str(model_path),
+                n_ctx=settings.local_context_size,
+                n_gpu_layers=settings.local_gpu_layers,
+                verbose=False
+            )
+            logger.info(f"Local model loaded successfully: {settings.local_model_name}")
+        except Exception as e:
+            logger.error(f"Failed to load local model: {str(e)}")
+            raise
+
     async def chat_completion(
         self,
         messages: List[Dict[str, str]],
@@ -65,7 +103,7 @@ class LLMClient:
             system_prompt: Optional system prompt (overrides messages system if provided)
             temperature: Sampling temperature (uses config default if None)
             max_tokens: Maximum tokens to generate (uses config default if None)
-            provider: Override default provider ('openai', 'anthropic', 'deepseek', or 'ollama')
+            provider: Override default provider ('openai', 'anthropic', 'deepseek', 'ollama', or 'local')
             model: Override default model
             json_mode: Enable JSON response mode
 
@@ -93,6 +131,10 @@ class LLMClient:
                 )
             elif provider == "ollama":
                 return await self._ollama_completion(
+                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                )
+            elif provider == "local":
+                return await self._local_completion(
                     messages, system_prompt, temperature, max_tokens, model, json_mode
                 )
             else:
@@ -278,6 +320,49 @@ class LLMClient:
                     raise ValueError(f"Ollama model {model_name} not available and pull failed: {str(pull_error)}")
             raise
 
+    async def _local_completion(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        model: Optional[str],
+        json_mode: bool
+    ) -> str:
+        """Generate completion using local GGUF model."""
+        if not LLAMA_CPP_AVAILABLE:
+            raise ValueError("Local model support not available. Install llama-cpp-python: pip install llama-cpp-python")
+
+        if self.local_model is None:
+            self._load_local_model()
+
+        # Prepare messages
+        formatted_messages = []
+        if system_prompt:
+            formatted_messages.append({"role": "system", "content": system_prompt})
+        formatted_messages.extend(messages)
+
+        logger.info(f"Calling local model: {settings.local_model_name}")
+
+        try:
+            # llama-cpp-python expects messages format
+            response = self.local_model.create_chat_completion(
+                messages=formatted_messages,
+                temperature=temperature if temperature is not None else settings.local_temperature,
+                max_tokens=max_tokens or settings.local_max_tokens,
+                response_format={"type": "json_object"} if json_mode else None
+            )
+
+            content = response['choices'][0]['message']['content']
+
+            logger.info(f"Local model completion successful")
+
+            return content
+
+        except Exception as e:
+            logger.error(f"Local model API call failed: {str(e)}")
+            raise
+
     async def generate_json(
         self,
         prompt: str,
@@ -297,9 +382,9 @@ class LLMClient:
         """
         messages = [{"role": "user", "content": prompt}]
 
-        # For OpenAI and DeepSeek, use JSON mode; for others, rely on system prompt
+        # For OpenAI, DeepSeek, Ollama, and Local use JSON mode; for others, rely on system prompt
         effective_provider = provider or self.provider
-        if effective_provider in ["openai", "deepseek", "ollama"]:
+        if effective_provider in ["openai", "deepseek", "ollama", "local"]:
             return await self.chat_completion(
                 messages=messages,
                 system_prompt=system_prompt,
