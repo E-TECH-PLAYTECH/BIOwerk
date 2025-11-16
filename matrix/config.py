@@ -43,6 +43,41 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", description="Logging level")
     environment: str = Field(default="development", description="Environment (development, staging, production)")
 
+    # Service Mesh Resilience Configuration
+    # Circuit Breaker Settings
+    circuit_breaker_enabled: bool = Field(default=True, description="Enable circuit breaker pattern")
+    circuit_breaker_failure_threshold: int = Field(default=5, description="Consecutive failures before opening circuit")
+    circuit_breaker_success_threshold: int = Field(default=2, description="Consecutive successes to close circuit in HALF_OPEN state")
+    circuit_breaker_timeout: int = Field(default=60, description="Seconds to wait before transitioning OPEN -> HALF_OPEN")
+    circuit_breaker_failure_rate_threshold: float = Field(default=0.5, description="Failure rate (0.0-1.0) to trigger circuit open")
+    circuit_breaker_window_size: int = Field(default=10, description="Number of recent calls to track for failure rate")
+
+    # Retry Settings
+    retry_enabled: bool = Field(default=True, description="Enable retry with exponential backoff")
+    retry_max_attempts: int = Field(default=3, description="Maximum number of retry attempts")
+    retry_initial_delay: float = Field(default=0.1, description="Initial retry delay in seconds")
+    retry_max_delay: float = Field(default=5.0, description="Maximum retry delay in seconds")
+    retry_exponential_base: float = Field(default=2.0, description="Base for exponential backoff calculation")
+    retry_jitter: bool = Field(default=True, description="Add random jitter to retry delays")
+
+    # Bulkhead Settings
+    bulkhead_enabled: bool = Field(default=True, description="Enable bulkhead pattern for resource isolation")
+    bulkhead_max_concurrent: int = Field(default=10, description="Maximum concurrent requests per service")
+    bulkhead_queue_size: int = Field(default=5, description="Maximum queued requests when at capacity")
+    bulkhead_timeout: float = Field(default=5.0, description="Timeout waiting for bulkhead slot in seconds")
+
+    # Health Check Settings
+    health_check_enabled: bool = Field(default=True, description="Enable health-aware routing")
+    health_check_interval: int = Field(default=10, description="Seconds between health checks")
+    health_unhealthy_threshold: int = Field(default=3, description="Consecutive failures before marking unhealthy")
+    health_healthy_threshold: int = Field(default=2, description="Consecutive successes before marking healthy")
+
+    # Service Timeout Settings
+    service_timeout_default: float = Field(default=30.0, description="Default service timeout in seconds")
+    service_timeout_mesh: float = Field(default=30.0, description="Mesh gateway timeout in seconds")
+    service_timeout_agent: float = Field(default=30.0, description="Agent service timeout in seconds")
+    service_timeout_health: float = Field(default=5.0, description="Health check timeout in seconds")
+
     # Authentication Configuration
     jwt_secret_key: str = Field(default="dev-secret-key-change-in-production", description="JWT secret key")
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
