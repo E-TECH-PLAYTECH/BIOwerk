@@ -100,7 +100,9 @@ services:
   mesh:
     build: ./mesh
     container_name: biowerk-mesh
-    ports: ["8080:8080"]
+    ports:
+      - "8080:8080"
+      - "8443:8443"  # HTTPS port
     environment:
       - AGENT_OSTEON_URL=http://osteon:8001
       - AGENT_MYOCYTE_URL=http://myocyte:8002
@@ -112,6 +114,22 @@ services:
       - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
+      # TLS/HTTPS Configuration
+      - TLS_ENABLED=${TLS_ENABLED:-false}
+      - TLS_CERT_FILE=/app/certs/cert.pem
+      - TLS_KEY_FILE=/app/certs/key.pem
+      - TLS_MIN_VERSION=${TLS_MIN_VERSION:-TLSv1.2}
+      # Rate Limiting Configuration
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      - RATE_LIMIT_STRATEGY=${RATE_LIMIT_STRATEGY:-sliding_window}
+      # Security Configuration
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    volumes:
+      - ./certs:/app/certs:ro  # Mount certificates (read-only)
     depends_on:
       pgbouncer:
         condition: service_healthy

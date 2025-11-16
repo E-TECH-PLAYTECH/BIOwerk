@@ -27,6 +27,80 @@ curl -X POST http://localhost:8080/osteon/draft -H 'Content-Type: application/js
 
 Need ongoing service insight? See [Operations](#operations) for observability and continuity guidance.
 
+## Security Features
+
+BIOwerk implements enterprise-grade security features for production deployments:
+
+### 🔒 TLS/HTTPS Encryption
+- **TLS 1.2/1.3 support** with secure cipher suites
+- **Self-signed certificates** for development (auto-generation)
+- **CA-signed certificates** for production
+- **Mutual TLS (mTLS)** for client certificate verification
+- **Certificate validation** and expiration monitoring
+
+**Quick Start:**
+```bash
+# Generate development certificates
+python scripts/generate_certs.py
+
+# Enable TLS in .env
+TLS_ENABLED=true
+TLS_CERT_FILE=./certs/cert.pem
+TLS_KEY_FILE=./certs/key.pem
+
+# Restart services
+docker-compose restart
+```
+
+### 🛡️ Rate Limiting
+- **Redis-backed** distributed rate limiting
+- **Multiple strategies**: Fixed window, Sliding window, Token bucket
+- **Per-IP and per-user** rate limiting
+- **Configurable burst** handling
+- **Standard headers** (`X-RateLimit-*`)
+
+**Configuration:**
+```bash
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=100    # requests per window
+RATE_LIMIT_WINDOW=60       # seconds
+RATE_LIMIT_STRATEGY=sliding_window
+```
+
+### 🔍 Dependency Vulnerability Scanning
+- **Automated scanning** with Safety and pip-audit
+- **GitHub Actions** integration (CI/CD)
+- **Pre-commit hooks** for local validation
+- **Daily scheduled** scans
+- **Docker image scanning** with Trivy
+
+**Run Security Scan:**
+```bash
+# Full security audit
+python scripts/security_scan.py --full
+
+# Dependencies only
+python scripts/security_scan.py --deps-only
+```
+
+### 🔐 Authentication & Authorization
+- **JWT token-based** authentication (HS256/RS256)
+- **API key management** with scopes and expiration
+- **Role-based access control** (RBAC)
+- **bcrypt password hashing**
+- **Configurable token expiration**
+
+### 📊 Security Monitoring
+- **Prometheus metrics** for rate limits and auth events
+- **Audit logging** with structured JSON
+- **Health checks** for service availability
+- **Security headers** in responses
+
+**Comprehensive Documentation:**
+- [Security Guide](docs/security.md) - Complete security documentation
+- [Scripts README](scripts/README.md) - Security tools and scripts
+- [GitHub Actions](.github/workflows/security.yml) - Automated scanning
+
 ## Architecture
 
 - Each agent is a FastAPI microservice with typed endpoints.

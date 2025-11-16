@@ -21,6 +21,10 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.20
 bcrypt==4.2.1
 
+# Security dependencies
+cryptography==44.0.0
+safety==3.2.11
+
 # LLM Provider SDKs
 openai==1.58.1
 anthropic==0.39.0
