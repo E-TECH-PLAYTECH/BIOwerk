@@ -196,10 +196,17 @@ jobs:
           echo "- ✅ Secrets Scan: ${{ needs.secrets-scan.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Additional Security Testing" >> $GITHUB_STEP_SUMMARY
+          echo "🔒 **OWASP ZAP Security Testing**: Available via separate workflow" >> $GITHUB_STEP_SUMMARY
+          echo "   - Baseline scans run on every push" >> $GITHUB_STEP_SUMMARY
+          echo "   - Full scans run weekly (Sundays at 3 AM UTC)" >> $GITHUB_STEP_SUMMARY
+          echo "   - API scans available via manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Recommendations" >> $GITHUB_STEP_SUMMARY
           echo "1. Review all security findings in the Actions artifacts" >> $GITHUB_STEP_SUMMARY
           echo "2. Update vulnerable dependencies to patched versions" >> $GITHUB_STEP_SUMMARY
           echo "3. Address any HIGH or CRITICAL vulnerabilities immediately" >> $GITHUB_STEP_SUMMARY
-          echo "4. Run local security scans with: \`python scripts/security_scan.py --full\`" >> $GITHUB_STEP_SUMMARY
+          echo "4. Check OWASP ZAP workflow for web application security findings" >> $GITHUB_STEP_SUMMARY
+          echo "5. Run local security scans with: \`python scripts/security_scan.py --full\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "For more information, see the [Security Documentation](docs/security.md)" >> $GITHUB_STEP_SUMMARY
+          echo "For more information, see the [Security Documentation](docs/SECURITY.md)" >> $GITHUB_STEP_SUMMARY
