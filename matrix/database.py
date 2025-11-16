@@ -145,6 +145,53 @@ async def close_redis():
 
 
 # ============================================================================
+# Session Management
+# ============================================================================
+
+def get_session_manager(session_type: str = "default"):
+    """
+    Get a configured session manager for storing session state in Redis.
+
+    Args:
+        session_type: Type of session ("short", "default", "long", "workflow")
+
+    Returns:
+        RedisSessionManager instance configured for the specified session type
+
+    Usage:
+        session_mgr = get_session_manager("workflow")
+        await session_mgr.set("msg_123", {"outline": ["Intro", "Body", "Conclusion"]})
+        data = await session_mgr.get("msg_123")
+    """
+    from .sessions import RedisSessionManager
+
+    redis = get_redis_client()
+
+    ttl_map = {
+        "short": settings.session_ttl_short,
+        "default": settings.session_ttl_default,
+        "long": settings.session_ttl_long,
+        "workflow": settings.session_ttl_workflow,
+    }
+
+    prefix_map = {
+        "short": f"{settings.session_prefix}:short",
+        "default": settings.session_prefix,
+        "long": f"{settings.session_prefix}:long",
+        "workflow": f"{settings.session_prefix}:workflow",
+    }
+
+    ttl = ttl_map.get(session_type, settings.session_ttl_default)
+    prefix = prefix_map.get(session_type, settings.session_prefix)
+
+    return RedisSessionManager(
+        redis_client=redis,
+        prefix=prefix,
+        default_ttl=ttl
+    )
+
+
+# ============================================================================
 # Application Lifecycle Management
 # ============================================================================
 
