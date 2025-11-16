@@ -404,6 +404,296 @@ services:
       moe:
         condition: service_started
 
+  # ==========================================
+  # OBSERVABILITY & MONITORING STACK (PLG)
+  # ==========================================
+
+  # Loki - Centralized log aggregation
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: biowerk-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Promtail - Log shipper for Loki
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: biowerk-promtail
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail_data:/tmp
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Prometheus - Metrics collection and storage
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: biowerk-prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ./observability/prometheus-config.yaml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus-rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - REGION=${REGION:-us-east-1}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Alertmanager - Alert routing and management
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: biowerk-alertmanager
+    ports:
+      - "9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.advertise-address=0.0.0.0:9093'
+    volumes:
+      - ./observability/alertmanager-config.yaml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    environment:
+      # PagerDuty configuration
+      - PAGERDUTY_SERVICE_KEY=${PAGERDUTY_SERVICE_KEY:-your-pagerduty-service-key}
+      - PAGERDUTY_SECURITY_SERVICE_KEY=${PAGERDUTY_SECURITY_SERVICE_KEY:-your-pagerduty-security-service-key}
+      # SMTP configuration for email alerts
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com:587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      # Slack configuration
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - SLACK_CRITICAL_WEBHOOK_URL=${SLACK_CRITICAL_WEBHOOK_URL:-}
+      - SLACK_WARNINGS_WEBHOOK_URL=${SLACK_WARNINGS_WEBHOOK_URL:-}
+      - SLACK_INFO_WEBHOOK_URL=${SLACK_INFO_WEBHOOK_URL:-}
+      - SLACK_DATABASE_WEBHOOK_URL=${SLACK_DATABASE_WEBHOOK_URL:-}
+      - SLACK_SECURITY_WEBHOOK_URL=${SLACK_SECURITY_WEBHOOK_URL:-}
+      - SLACK_COMPLIANCE_WEBHOOK_URL=${SLACK_COMPLIANCE_WEBHOOK_URL:-}
+      - SLACK_PRODUCT_WEBHOOK_URL=${SLACK_PRODUCT_WEBHOOK_URL:-}
+      # Slack channels
+      - SLACK_CRITICAL_CHANNEL=${SLACK_CRITICAL_CHANNEL:-#biowerk-critical-alerts}
+      - SLACK_WARNINGS_CHANNEL=${SLACK_WARNINGS_CHANNEL:-#biowerk-warnings}
+      - SLACK_INFO_CHANNEL=${SLACK_INFO_CHANNEL:-#biowerk-info}
+      - SLACK_DATABASE_CHANNEL=${SLACK_DATABASE_CHANNEL:-#biowerk-database}
+      - SLACK_SECURITY_CHANNEL=${SLACK_SECURITY_CHANNEL:-#biowerk-security}
+      - SLACK_COMPLIANCE_CHANNEL=${SLACK_COMPLIANCE_CHANNEL:-#biowerk-compliance}
+      - SLACK_PRODUCT_CHANNEL=${SLACK_PRODUCT_CHANNEL:-#biowerk-product}
+      # Email configuration
+      - DEFAULT_EMAIL_TO=${DEFAULT_EMAIL_TO:-ops-team@example.com}
+      - DATABASE_TEAM_EMAIL=${DATABASE_TEAM_EMAIL:-database-team@example.com}
+      - COMPLIANCE_TEAM_EMAIL=${COMPLIANCE_TEAM_EMAIL:-compliance-team@example.com}
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Grafana - Visualization and dashboards
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: biowerk-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      # Admin credentials (CHANGE IN PRODUCTION)
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Server configuration
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_DOMAIN=localhost
+      # Security
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:-changeme}
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      # Database (use PostgreSQL for production)
+      - GF_DATABASE_TYPE=${GRAFANA_DB_TYPE:-sqlite3}
+      - GF_DATABASE_HOST=${GRAFANA_DB_HOST:-postgres:5432}
+      - GF_DATABASE_NAME=${GRAFANA_DB_NAME:-grafana}
+      - GF_DATABASE_USER=${GRAFANA_DB_USER:-biowerk}
+      - GF_DATABASE_PASSWORD=${GRAFANA_DB_PASSWORD:-biowerk_dev_password}
+      # Provisioning
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      # Analytics
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # Logging
+      - GF_LOG_LEVEL=${GRAFANA_LOG_LEVEL:-info}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ==========================================
+  # MONITORING EXPORTERS
+  # ==========================================
+
+  # PostgreSQL Exporter
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: biowerk-postgres-exporter
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://biowerk:biowerk_dev_password@postgres:5432/biowerk?sslmode=disable
+      - PG_EXPORTER_EXTEND_QUERY_PATH=/etc/postgres_exporter/queries.yaml
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9187/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: biowerk-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9121/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # MongoDB Exporter
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.40
+    container_name: biowerk-mongodb-exporter
+    ports:
+      - "9216:9216"
+    environment:
+      - MONGODB_URI=mongodb://biowerk:biowerk_dev_password@mongodb:27017/biowerk
+    command:
+      - '--mongodb.uri=mongodb://biowerk:biowerk_dev_password@mongodb:27017/biowerk'
+      - '--collect-all'
+      - '--compatible-mode'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9216/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # PgBouncer Exporter
+  pgbouncer-exporter:
+    image: prometheuscommunity/pgbouncer-exporter:v0.7.0
+    container_name: biowerk-pgbouncer-exporter
+    ports:
+      - "9127:9127"
+    environment:
+      - PGBOUNCER_EXPORTER_HOST=pgbouncer
+      - PGBOUNCER_EXPORTER_PORT=6432
+      - PGBOUNCER_USER=biowerk
+      - PGBOUNCER_PASS=biowerk_dev_password
+      - DATABASE_URL=postgresql://biowerk:biowerk_dev_password@pgbouncer:6432/pgbouncer?sslmode=disable
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9127/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Node Exporter - Host metrics
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: biowerk-node-exporter
+    ports:
+      - "9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    restart: unless-stopped
+
+  # cAdvisor - Container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: biowerk-cadvisor
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     driver: local
@@ -414,4 +704,15 @@ volumes:
   ollama_data:
     driver: local
   gdpr_exports:
+    driver: local
+  # Observability volumes
+  loki_data:
+    driver: local
+  promtail_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  alertmanager_data:
+    driver: local
+  grafana_data:
     driver: local
