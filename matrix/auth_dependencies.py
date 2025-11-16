@@ -184,6 +184,137 @@ async def get_current_user_or_api_key(
 # Role-Based Access Control (RBAC)
 # ============================================================================
 
+async def get_user_roles(user_id: str, db: AsyncSession) -> list:
+    """
+    Get all active roles for a user.
+
+    Args:
+        user_id: User ID
+        db: Database session
+
+    Returns:
+        List of role names
+    """
+    from .db_models import UserRole, Role
+    from datetime import datetime
+
+    stmt = select(Role).join(UserRole).where(
+        UserRole.user_id == user_id,
+        UserRole.is_active == True,  # noqa: E712
+        Role.is_active == True,  # noqa: E712
+        (UserRole.expires_at.is_(None) | (UserRole.expires_at > datetime.utcnow()))
+    )
+    result = await db.execute(stmt)
+    roles = result.scalars().all()
+    return [role.name for role in roles]
+
+
+async def get_user_permissions(user_id: str, db: AsyncSession, resource_type: Optional[str] = None) -> list:
+    """
+    Get all active permissions for a user.
+
+    Args:
+        user_id: User ID
+        db: Database session
+        resource_type: Optional resource type filter
+
+    Returns:
+        List of (action, resource_type) tuples
+    """
+    from .db_models import UserRole, Role, RolePermission, Permission
+    from datetime import datetime
+
+    # Build query to get permissions through user roles
+    stmt = select(Permission).join(RolePermission).join(Role).join(UserRole).where(
+        UserRole.user_id == user_id,
+        UserRole.is_active == True,  # noqa: E712
+        Role.is_active == True,  # noqa: E712
+        RolePermission.is_active == True,  # noqa: E712
+        Permission.is_active == True,  # noqa: E712
+        (UserRole.expires_at.is_(None) | (UserRole.expires_at > datetime.utcnow())),
+        (RolePermission.expires_at.is_(None) | (RolePermission.expires_at > datetime.utcnow()))
+    )
+
+    if resource_type:
+        stmt = stmt.where(Permission.resource_type == resource_type)
+
+    result = await db.execute(stmt)
+    permissions = result.scalars().all()
+    return [(perm.action, perm.resource_type) for perm in permissions]
+
+
+async def has_permission(
+    user: User,
+    action: str,
+    resource_type: str,
+    db: AsyncSession,
+    resource_id: Optional[str] = None
+) -> bool:
+    """
+    Check if user has specific permission.
+
+    Args:
+        user: User object
+        action: Permission action (read, write, delete, admin)
+        resource_type: Resource type (project, artifact, execution, etc.)
+        db: Database session
+        resource_id: Optional specific resource ID
+
+    Returns:
+        True if user has permission, False otherwise
+    """
+    # Admin users have all permissions
+    if user.is_admin:
+        return True
+
+    # Check if user has the permission through their roles
+    permissions = await get_user_permissions(user.id, db, resource_type)
+
+    # Check for exact permission match
+    if (action, resource_type) in permissions:
+        return True
+
+    # Check for admin permission on resource type (admin can do anything)
+    if ("admin", resource_type) in permissions:
+        return True
+
+    # Check for global admin permission
+    if ("admin", "global") in permissions:
+        return True
+
+    return False
+
+
+async def is_resource_owner(
+    user: User,
+    resource_type: str,
+    resource_id: str,
+    db: AsyncSession
+) -> bool:
+    """
+    Check if user owns a specific resource.
+
+    Args:
+        user: User object
+        resource_type: Resource type
+        resource_id: Resource ID
+        db: Database session
+
+    Returns:
+        True if user owns the resource, False otherwise
+    """
+    from .db_models import ResourceOwnership
+
+    stmt = select(ResourceOwnership).where(
+        ResourceOwnership.resource_type == resource_type,
+        ResourceOwnership.resource_id == resource_id,
+        ResourceOwnership.owner_id == user.id
+    )
+    result = await db.execute(stmt)
+    ownership = result.scalar_one_or_none()
+    return ownership is not None
+
+
 def require_admin(current_user: User = Depends(get_current_active_user)) -> User:
     """
     Require admin role for endpoint.
@@ -200,6 +331,163 @@ def require_admin(current_user: User = Depends(get_current_active_user)) -> User
             detail="Admin access required"
         )
     return current_user
+
+
+def require_role(*required_roles: str):
+    """
+    Require specific role(s) for endpoint.
+
+    Usage:
+        @app.post("/projects")
+        async def create_project(user: User = Depends(require_role("admin", "user"))):
+            # Only users with admin or user role can access this
+            return {"message": "Authorized"}
+
+    Args:
+        required_roles: One or more role names required
+
+    Returns:
+        Dependency function
+    """
+    async def _check_role(
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_postgres_session)
+    ) -> User:
+        # Admin always has access
+        if current_user.is_admin:
+            return current_user
+
+        # Get user roles
+        user_roles = await get_user_roles(current_user.id, db)
+
+        # Check if user has any of the required roles
+        if not any(role in user_roles for role in required_roles):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Required role(s): {', '.join(required_roles)}"
+            )
+
+        return current_user
+
+    return _check_role
+
+
+def require_permission(action: str, resource_type: str):
+    """
+    Require specific permission for endpoint.
+
+    Usage:
+        @app.post("/projects")
+        async def create_project(user: User = Depends(require_permission("write", "project"))):
+            # Only users with write permission on projects can access this
+            return {"message": "Authorized"}
+
+    Args:
+        action: Permission action (read, write, delete, admin)
+        resource_type: Resource type (project, artifact, execution, etc.)
+
+    Returns:
+        Dependency function
+    """
+    async def _check_permission(
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_postgres_session)
+    ) -> User:
+        # Check if user has permission
+        if not await has_permission(current_user, action, resource_type, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {action} on {resource_type}"
+            )
+
+        return current_user
+
+    return _check_permission
+
+
+def require_resource_permission(action: str, resource_type: str, allow_owner: bool = True):
+    """
+    Require permission for specific resource, with optional owner check.
+
+    Usage:
+        @app.delete("/projects/{project_id}")
+        async def delete_project(
+            project_id: str,
+            user_and_resource: tuple = Depends(require_resource_permission("delete", "project"))
+        ):
+            user, resource_id = user_and_resource
+            # User has delete permission or is the owner
+            return {"message": "Deleted"}
+
+    Args:
+        action: Permission action (read, write, delete, admin)
+        resource_type: Resource type (project, artifact, execution, etc.)
+        allow_owner: If True, resource owner can perform action even without explicit permission
+
+    Returns:
+        Dependency function that returns (user, resource_id) tuple
+    """
+    async def _check_resource_permission(
+        resource_id: str,
+        current_user: User = Depends(get_current_active_user),
+        db: AsyncSession = Depends(get_postgres_session)
+    ) -> tuple:
+        # Check if user has permission
+        has_perm = await has_permission(current_user, action, resource_type, db, resource_id)
+
+        # If user doesn't have permission, check if they're the owner (if allowed)
+        if not has_perm and allow_owner:
+            is_owner = await is_resource_owner(current_user, resource_type, resource_id, db)
+            if not is_owner:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Permission denied: {action} on {resource_type}:{resource_id}"
+                )
+        elif not has_perm:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {action} on {resource_type}:{resource_id}"
+            )
+
+        return (current_user, resource_id)
+
+    return _check_resource_permission
+
+
+async def check_resource_access(
+    user: User,
+    resource_type: str,
+    resource_id: str,
+    action: str,
+    db: AsyncSession,
+    allow_owner: bool = True
+) -> bool:
+    """
+    Check if user can access a specific resource.
+
+    Args:
+        user: User object
+        resource_type: Resource type
+        resource_id: Resource ID
+        action: Permission action
+        db: Database session
+        allow_owner: If True, resource owner has access
+
+    Returns:
+        True if user has access, False otherwise
+    """
+    # Check permission
+    has_perm = await has_permission(user, action, resource_type, db, resource_id)
+    if has_perm:
+        return True
+
+    # Check ownership if allowed
+    if allow_owner:
+        is_owner = await is_resource_owner(user, resource_type, resource_id, db)
+        if is_owner:
+            return True
+
+    return False
 
 
 def require_scopes(*required_scopes: str):
