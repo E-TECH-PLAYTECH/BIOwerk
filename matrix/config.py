@@ -105,6 +105,35 @@ class Settings(BaseSettings):
     rate_limit_burst: int = Field(default=20, description="Burst size for token bucket strategy")
     rate_limit_exclude_paths: list = Field(default_factory=lambda: ["/health", "/metrics"], description="Paths to exclude from rate limiting")
 
+    # Audit Logging Configuration
+    audit_enabled: bool = Field(default=True, description="Enable comprehensive audit logging")
+    audit_log_requests: bool = Field(default=True, description="Log all API requests")
+    audit_log_responses: bool = Field(default=True, description="Log all API responses")
+    audit_encrypt_sensitive: bool = Field(default=True, description="Encrypt sensitive fields in audit logs")
+    audit_retention_days: int = Field(default=365, description="Default audit log retention period in days")
+    audit_retention_auth_days: int = Field(default=90, description="Retention for authentication events")
+    audit_retention_data_days: int = Field(default=2555, description="Retention for data modification events (7 years)")
+    audit_retention_security_days: int = Field(default=730, description="Retention for security events (2 years)")
+    audit_collect_geo: bool = Field(default=False, description="Collect geolocation data (requires external service)")
+    audit_max_field_size: int = Field(default=65536, description="Maximum size for request/response fields (64KB)")
+    audit_sensitive_fields: list = Field(
+        default_factory=lambda: ["password", "token", "api_key", "secret", "credential", "authorization"],
+        description="Field names to always encrypt"
+    )
+    audit_batch_size: int = Field(default=100, description="Batch size for bulk audit log writes")
+    audit_async_write: bool = Field(default=True, description="Write audit logs asynchronously")
+
+    # Encryption Configuration
+    encryption_enabled: bool = Field(default=True, description="Enable encryption at rest for sensitive data")
+    encryption_master_key: str = Field(
+        default="change-this-master-key-in-production-min-32-chars-required",
+        description="Master encryption key (KEK) - USE KMS IN PRODUCTION"
+    )
+    encryption_key_version: int = Field(default=1, description="Current encryption key version")
+    encryption_key_rotation_days: int = Field(default=90, description="Days before key rotation is recommended")
+    encryption_salt: Optional[str] = Field(default=None, description="Base64-encoded salt for key derivation")
+    encryption_algorithm: str = Field(default="AES-256-GCM", description="Encryption algorithm")
+
     # LLM Provider Configuration
     llm_provider: str = Field(default="ollama", description="Primary LLM provider: 'openai', 'anthropic', 'deepseek', 'ollama', or 'local'")
 
