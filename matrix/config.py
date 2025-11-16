@@ -86,6 +86,25 @@ class Settings(BaseSettings):
     api_key_header: str = Field(default="X-API-Key", description="API key header name")
     require_auth: bool = Field(default=False, description="Require authentication for all endpoints")
 
+    # TLS/HTTPS Configuration
+    tls_enabled: bool = Field(default=False, description="Enable TLS/HTTPS")
+    tls_cert_file: str = Field(default="./certs/cert.pem", description="Path to TLS certificate file")
+    tls_key_file: str = Field(default="./certs/key.pem", description="Path to TLS private key file")
+    tls_ca_file: Optional[str] = Field(default=None, description="Path to TLS CA certificate file (for client cert verification)")
+    tls_verify_client: bool = Field(default=False, description="Require and verify client certificates (mTLS)")
+    tls_min_version: str = Field(default="TLSv1.2", description="Minimum TLS version (TLSv1.2 or TLSv1.3)")
+    tls_ciphers: Optional[str] = Field(default=None, description="Custom TLS cipher suite (None = secure defaults)")
+
+    # Rate Limiting Configuration
+    rate_limit_enabled: bool = Field(default=True, description="Enable rate limiting")
+    rate_limit_requests: int = Field(default=100, description="Number of requests allowed per window")
+    rate_limit_window: int = Field(default=60, description="Time window in seconds for rate limiting")
+    rate_limit_strategy: str = Field(default="sliding_window", description="Rate limit strategy: 'fixed_window', 'sliding_window', or 'token_bucket'")
+    rate_limit_per_ip: bool = Field(default=True, description="Apply rate limiting per IP address")
+    rate_limit_per_user: bool = Field(default=True, description="Apply rate limiting per authenticated user")
+    rate_limit_burst: int = Field(default=20, description="Burst size for token bucket strategy")
+    rate_limit_exclude_paths: list = Field(default_factory=lambda: ["/health", "/metrics"], description="Paths to exclude from rate limiting")
+
     # LLM Provider Configuration
     llm_provider: str = Field(default="ollama", description="Primary LLM provider: 'openai', 'anthropic', 'deepseek', 'ollama', or 'local'")
 
