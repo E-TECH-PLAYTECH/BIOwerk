@@ -228,6 +228,17 @@ scrape_configs:
           tier: infrastructure
     metrics_path: /metrics
 
+  # Backup Orchestrator - Backup & DR service
+  - job_name: 'backup-orchestrator'
+    static_configs:
+      - targets: ['backup-orchestrator:8090']
+        labels:
+          service: backup-orchestrator
+          tier: infrastructure
+          component: backup-dr
+    metrics_path: /metrics
+    scrape_interval: 30s
+
 # Remote write configuration (for long-term storage - optional)
 # Uncomment and configure for production deployments
 # remote_write:

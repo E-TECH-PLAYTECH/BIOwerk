@@ -694,6 +694,99 @@ services:
       - /dev/kmsg
     restart: unless-stopped
 
+  # ==========================================
+  # BACKUP & DISASTER RECOVERY
+  # ==========================================
+
+  # Backup Orchestrator - Enterprise-grade backup and DR service
+  backup-orchestrator:
+    build: ./backup-service
+    container_name: biowerk-backup-orchestrator
+    ports:
+      - "8090:8090"
+    environment:
+      # Service configuration
+      - PORT=8090
+      - LOG_LEVEL=${BACKUP_LOG_LEVEL:-INFO}
+
+      # PostgreSQL configuration
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=biowerk
+      - POSTGRES_PASSWORD=biowerk_dev_password
+      - POSTGRES_DB=biowerk
+      - POSTGRES_BACKUP_ENABLED=${POSTGRES_BACKUP_ENABLED:-true}
+      - POSTGRES_BACKUP_SCHEDULE=${POSTGRES_BACKUP_SCHEDULE:-0 2 * * *}
+
+      # MongoDB configuration
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_USER=biowerk
+      - MONGODB_PASSWORD=biowerk_dev_password
+      - MONGODB_DB=biowerk
+      - MONGODB_BACKUP_ENABLED=${MONGODB_BACKUP_ENABLED:-true}
+      - MONGODB_BACKUP_SCHEDULE=${MONGODB_BACKUP_SCHEDULE:-30 2 * * *}
+
+      # Redis configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_BACKUP_ENABLED=${REDIS_BACKUP_ENABLED:-true}
+      - REDIS_BACKUP_SCHEDULE=${REDIS_BACKUP_SCHEDULE:-0 3 * * *}
+
+      # Backup configuration
+      - BACKUP_DIR=/var/backups/biowerk
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-30}
+      - BACKUP_RETENTION_WEEKLY=${BACKUP_RETENTION_WEEKLY:-12}
+      - BACKUP_RETENTION_MONTHLY=${BACKUP_RETENTION_MONTHLY:-12}
+      - ENCRYPTION_ENABLED=${BACKUP_ENCRYPTION_ENABLED:-true}
+      - COMPRESSION=${BACKUP_COMPRESSION:-zstd}
+      - VERIFY_BACKUP=${BACKUP_VERIFY:-true}
+      - VERIFICATION_SCHEDULE=${BACKUP_VERIFICATION_SCHEDULE:-0 4 * * 0}
+
+      # Cloud storage configuration
+      - S3_ENABLED=${BACKUP_S3_ENABLED:-false}
+      - S3_BUCKET=${BACKUP_S3_BUCKET:-}
+      - S3_REGION=${BACKUP_S3_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+
+      # DR configuration
+      - RTO_TARGET=${DR_RTO_TARGET:-4h}
+      - RPO_TARGET=${DR_RPO_TARGET:-1h}
+      - DR_TEST_ENABLED=${DR_TEST_ENABLED:-true}
+      - DR_TEST_SCHEDULE=${DR_TEST_SCHEDULE:-0 4 * * 0}
+    volumes:
+      # Backup storage
+      - backup_data:/var/backups/biowerk
+      # Database data access (read-only for backups)
+      - postgres_data:/var/lib/postgresql/data:ro
+      - mongodb_data:/var/lib/mongodb/data:ro
+      - redis_data:/data:ro
+      # Configuration and secrets
+      - ./backup-service/config:/etc/biowerk:ro
+      - backup_keys:/etc/biowerk/keys
+      # Logs and metrics
+      - backup_logs:/var/log/biowerk
+      - backup_metrics:/var/lib/biowerk/metrics
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - default
+
 volumes:
   postgres_data:
     driver: local
@@ -715,4 +808,13 @@ volumes:
   alertmanager_data:
     driver: local
   grafana_data:
+    driver: local
+  # Backup & DR volumes
+  backup_data:
+    driver: local
+  backup_logs:
+    driver: local
+  backup_metrics:
+    driver: local
+  backup_keys:
     driver: local
