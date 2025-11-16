@@ -10,8 +10,12 @@ import time
 import json
 
 app = FastAPI(title="Osteon")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="osteon", service_version="1.0.0")
 logger = setup_logging("osteon")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="osteon", version="1.0.0")
 
 # Redis-based session manager for persistent state across requests
 # Uses 1-hour TTL for document generation workflows

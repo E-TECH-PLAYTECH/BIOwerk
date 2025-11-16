@@ -28,11 +28,17 @@ from matrix.resilience import (
     RetryExhaustedError,
     BulkheadFullError
 )
+from matrix.observability import setup_instrumentation
+from matrix.health import setup_health_endpoints
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Moe - Orchestrator Stooge")
+
+# Setup comprehensive observability and health endpoints
+setup_instrumentation(app, service_name="moe", service_version="1.0.0")
+setup_health_endpoints(app, service_name="moe", version="1.0.0")
 
 # Load PHI2 model
 MODEL_PATH = Path("./models/phi2/model.gguf")

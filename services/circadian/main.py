@@ -9,8 +9,12 @@ import time
 import json
 
 app = FastAPI(title="Circadian")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="circadian", service_version="1.0.0")
 logger = setup_logging("circadian")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="circadian", version="1.0.0")
 
 @app.post("/plan_timeline", response_model=Reply)
 async def plan_timeline(msg: Msg):

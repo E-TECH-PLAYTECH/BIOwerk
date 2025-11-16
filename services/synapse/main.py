@@ -9,8 +9,12 @@ import time
 import json
 
 app = FastAPI(title="Synapse")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="synapse", service_version="1.0.0")
 logger = setup_logging("synapse")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="synapse", version="1.0.0")
 
 @app.post("/storyboard", response_model=Reply)
 async def storyboard(msg: Msg):

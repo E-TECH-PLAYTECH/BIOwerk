@@ -10,8 +10,12 @@ import json
 import base64
 
 app = FastAPI(title="Chaperone")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="chaperone", service_version="1.0.0")
 logger = setup_logging("chaperone")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="chaperone", version="1.0.0")
 
 @app.post("/import_artifact", response_model=Reply)
 async def import_artifact(msg: Msg):
