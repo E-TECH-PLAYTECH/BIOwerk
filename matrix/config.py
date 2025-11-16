@@ -175,6 +175,29 @@ class Settings(BaseSettings):
     local_context_size: int = Field(default=4096, description="Local model context window size")
     local_gpu_layers: int = Field(default=0, description="Number of layers to offload to GPU (0=CPU only)")
 
+    # OpenTelemetry / Distributed Tracing Configuration
+    otel_enabled: bool = Field(default=True, description="Enable OpenTelemetry distributed tracing")
+    otel_service_name: str = Field(default="biowerk", description="OpenTelemetry service name")
+    otel_exporter_type: str = Field(default="otlp", description="Exporter type: 'otlp', 'jaeger', 'console', or 'none'")
+    otel_exporter_endpoint: str = Field(default="http://jaeger:4317", description="OTLP/Jaeger collector endpoint")
+    otel_exporter_protocol: str = Field(default="grpc", description="OTLP protocol: 'grpc' or 'http/protobuf'")
+    otel_sampling_ratio: float = Field(default=1.0, description="Trace sampling ratio (0.0-1.0, 1.0=100%)")
+    otel_log_correlation: bool = Field(default=True, description="Enable trace context in logs")
+    otel_export_timeout: int = Field(default=30, description="Span export timeout in seconds")
+    otel_max_queue_size: int = Field(default=2048, description="Maximum queue size for spans")
+    otel_max_export_batch_size: int = Field(default=512, description="Maximum batch size for span export")
+    otel_instrument_db: bool = Field(default=True, description="Instrument database calls")
+    otel_instrument_http: bool = Field(default=True, description="Instrument HTTP calls")
+    otel_instrument_redis: bool = Field(default=True, description="Instrument Redis calls")
+
+    # Health Check Configuration (Enhanced)
+    health_enabled: bool = Field(default=True, description="Enable /health and /ready endpoints")
+    health_check_db: bool = Field(default=True, description="Include database checks in health endpoints")
+    health_check_redis: bool = Field(default=True, description="Include Redis checks in health endpoints")
+    health_check_dependencies: bool = Field(default=True, description="Check external service dependencies")
+    health_check_timeout: float = Field(default=5.0, description="Timeout for health checks in seconds")
+    health_startup_grace_period: int = Field(default=30, description="Grace period for startup health checks in seconds")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

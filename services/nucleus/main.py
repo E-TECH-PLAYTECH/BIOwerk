@@ -10,8 +10,12 @@ import json
 import httpx
 
 app = FastAPI(title="Nucleus")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="nucleus", service_version="1.0.0")
 logger = setup_logging("nucleus")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="nucleus", version="1.0.0")
 
 AGENTS = {
     "osteon": "http://mesh:8080/osteon",

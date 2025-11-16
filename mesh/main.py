@@ -107,8 +107,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Mesh Gateway", lifespan=lifespan)
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="mesh", service_version="1.0.0")
 logger = setup_logging("mesh")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="mesh", version="1.0.0")
 
 @app.post("/{agent}/{endpoint}")
 async def route(agent: str, endpoint: str, request: Request):
@@ -270,6 +274,9 @@ async def route(agent: str, endpoint: str, request: Request):
 
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-@app.get("/health")
-def health():
+# Health and readiness endpoints are now provided by setup_health_endpoints()
+# Legacy endpoint for backward compatibility
+@app.get("/health/legacy")
+def health_legacy():
+    """Legacy health endpoint for backward compatibility."""
     return {"ok": True, "ts": time.time(), "agents": list(AGENT_URLS.keys())}

@@ -35,9 +35,13 @@ app = FastAPI(
     description="Enterprise GDPR compliance and privacy management",
     version="1.0.0"
 )
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="gdpr", service_version="1.0.0")
 logger = setup_logging("gdpr")
 session_mgr = get_session_manager("long")  # 8-hour sessions for long-running operations
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="gdpr", version="1.0.0")
 
 
 # ============================================================================

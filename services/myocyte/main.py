@@ -9,8 +9,12 @@ import time
 import json
 
 app = FastAPI(title="Myocyte")
-setup_instrumentation(app)
+setup_instrumentation(app, service_name="myocyte", service_version="1.0.0")
 logger = setup_logging("myocyte")
+
+# Setup comprehensive health and readiness endpoints
+from matrix.health import setup_health_endpoints
+setup_health_endpoints(app, service_name="myocyte", version="1.0.0")
 
 @app.post("/ingest_table", response_model=Reply)
 async def ingest_table(msg: Msg):
