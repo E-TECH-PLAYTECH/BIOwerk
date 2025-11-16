@@ -269,3 +269,203 @@ class AuditLog(Base):
             f"action={self.event_action}, status={self.event_status}, "
             f"user_id={self.user_id}, resource={self.resource_type}:{self.resource_id})>"
         )
+
+
+class RetentionPolicy(Base):
+    """
+    Data Retention Policy model for SOC2, HIPAA, GDPR, PCI-DSS compliance.
+
+    Defines rules for how long different types of data should be retained,
+    what action to take when retention period expires, and compliance framework alignment.
+    """
+    __tablename__ = "retention_policies"
+
+    # Primary identifiers
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+
+    # Policy scope
+    data_type = Column(String(50), nullable=False, index=True)  # user, project, artifact, execution, api_key, audit_log, session
+    category_filter = Column(JSON, nullable=True)  # Optional: filter by category/subcategory
+    user_filter = Column(JSON, nullable=True)  # Optional: apply to specific users
+    conditions = Column(JSON, nullable=True)  # Custom conditions as JSON (field: value pairs)
+
+    # Retention configuration
+    retention_period_days = Column(Integer, nullable=False)  # How long to retain (e.g., 90, 365, 2555)
+    action = Column(String(50), nullable=False, default="delete")  # archive, delete, anonymize, retain
+    archive_before_delete = Column(Boolean, default=True, nullable=False)  # Always archive before deleting
+
+    # Compliance framework
+    compliance_framework = Column(String(50), nullable=False, index=True)  # soc2, hipaa, gdpr, pci_dss, ccpa, iso27001
+    regulatory_citation = Column(Text, nullable=True)  # Reference to specific regulation (e.g., "HIPAA 164.530(j)(2)")
+
+    # Policy priority and status
+    priority = Column(Integer, default=0, nullable=False)  # Higher priority policies are evaluated first
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    # Metadata
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    last_enforced_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    creator = relationship("User", foreign_keys=[created_by])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_retention_policy_type", "data_type", "is_active"),
+        Index("idx_retention_policy_framework", "compliance_framework", "is_active"),
+        Index("idx_retention_policy_priority", "priority", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<RetentionPolicy(id={self.id}, name={self.name}, data_type={self.data_type}, retention_days={self.retention_period_days})>"
+
+
+class RetentionSchedule(Base):
+    """
+    Retention Schedule model for tracking when data is scheduled for deletion/archival.
+
+    Tracks individual data items and their scheduled retention actions.
+    Supports legal holds to prevent deletion during litigation or investigations.
+    """
+    __tablename__ = "retention_schedules"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Data reference
+    data_type = Column(String(50), nullable=False, index=True)
+    data_id = Column(String(36), nullable=False, index=True)  # ID of the actual data record
+    policy_id = Column(String(36), ForeignKey("retention_policies.id", ondelete="SET NULL"), nullable=True)
+
+    # Schedule information
+    scheduled_for = Column(DateTime(timezone=True), nullable=True, index=True)  # When to execute retention action
+    action = Column(String(50), nullable=False)  # archive, delete, anonymize
+    status = Column(String(50), default="pending", nullable=False, index=True)  # pending, in_progress, completed, failed
+
+    # Legal hold (prevents deletion)
+    legal_hold = Column(Boolean, default=False, nullable=False, index=True)
+    legal_hold_reason = Column(Text, nullable=True)  # Reason for hold (case number, investigation details)
+    legal_hold_applied_at = Column(DateTime(timezone=True), nullable=True)
+    legal_hold_applied_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    legal_hold_removed_at = Column(DateTime(timezone=True), nullable=True)
+    legal_hold_removed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Execution tracking
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    policy = relationship("RetentionPolicy", foreign_keys=[policy_id])
+    hold_applied_by_user = relationship("User", foreign_keys=[legal_hold_applied_by])
+    hold_removed_by_user = relationship("User", foreign_keys=[legal_hold_removed_by])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_retention_schedule_data", "data_type", "data_id"),
+        Index("idx_retention_schedule_pending", "status", "scheduled_for"),
+        Index("idx_retention_schedule_hold", "legal_hold", "data_type"),
+    )
+
+    def __repr__(self):
+        return f"<RetentionSchedule(id={self.id}, data_type={self.data_type}, data_id={self.data_id}, action={self.action}, legal_hold={self.legal_hold})>"
+
+
+class DataArchive(Base):
+    """
+    Data Archive model for storing archived data before deletion.
+
+    Securely stores complete snapshots of deleted data with encryption.
+    Enables data recovery if needed and maintains compliance audit trails.
+    """
+    __tablename__ = "data_archives"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Data reference
+    data_type = Column(String(50), nullable=False, index=True)
+    data_id = Column(String(36), nullable=False, index=True)  # Original ID of the data
+    policy_id = Column(String(36), ForeignKey("retention_policies.id", ondelete="SET NULL"), nullable=True)
+
+    # Archived data (encrypted)
+    archived_data = Column(JSON, nullable=False)  # Encrypted complete data snapshot
+    data_hash = Column(String(64), nullable=False)  # SHA-256 hash for integrity verification
+    encryption_key_version = Column(Integer, nullable=True)  # Which encryption key was used
+
+    # Archive metadata
+    archive_reason = Column(String(100), default="retention_policy")  # retention_policy, manual, legal_requirement
+    archive_status = Column(String(50), default="completed", nullable=False, index=True)  # pending, in_progress, completed, failed, restored
+
+    # Restoration tracking
+    restored_at = Column(DateTime(timezone=True), nullable=True)
+    restored_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Timestamps
+    archived_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)  # When archive itself should be deleted
+
+    # Relationships
+    policy = relationship("RetentionPolicy", foreign_keys=[policy_id])
+    restored_by = relationship("User", foreign_keys=[restored_by_user_id])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_archive_data", "data_type", "data_id"),
+        Index("idx_archive_status", "archive_status", "archived_at"),
+        Index("idx_archive_expiration", "expires_at"),
+    )
+
+    def __repr__(self):
+        return f"<DataArchive(id={self.id}, data_type={self.data_type}, data_id={self.data_id}, status={self.archive_status})>"
+
+
+class RetentionAuditLog(Base):
+    """
+    Retention Audit Log for tracking all retention policy enforcement actions.
+
+    Provides complete audit trail for SOC2/HIPAA/GDPR compliance reporting.
+    Tracks every archival, deletion, and anonymization action.
+    """
+    __tablename__ = "retention_audit_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Action details
+    data_type = Column(String(50), nullable=False, index=True)
+    data_id = Column(String(36), nullable=False, index=True)
+    policy_id = Column(String(36), ForeignKey("retention_policies.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(50), nullable=False, index=True)  # archive, delete, anonymize, legal_hold_applied, legal_hold_removed
+
+    # Execution details
+    status = Column(String(50), nullable=False, index=True)  # completed, failed
+    error_message = Column(Text, nullable=True)
+    archive_id = Column(String(36), ForeignKey("data_archives.id", ondelete="SET NULL"), nullable=True)  # Link to archive if created
+
+    # Actor
+    executed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # NULL for automated actions
+    execution_type = Column(String(50), default="automated")  # automated, manual
+
+    # Timestamps
+    executed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationships
+    policy = relationship("RetentionPolicy", foreign_keys=[policy_id])
+    archive = relationship("DataArchive", foreign_keys=[archive_id])
+    executor = relationship("User", foreign_keys=[executed_by])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_retention_audit_action", "action", "executed_at"),
+        Index("idx_retention_audit_data", "data_type", "data_id"),
+        Index("idx_retention_audit_policy", "policy_id", "executed_at"),
+        Index("idx_retention_audit_status", "status", "executed_at"),
+    )
+
+    def __repr__(self):
+        return f"<RetentionAuditLog(id={self.id}, data_type={self.data_type}, action={self.action}, status={self.status})>"
