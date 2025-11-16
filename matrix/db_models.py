@@ -675,3 +675,345 @@ class DataBreachIncident(Base):
 
     def __repr__(self):
         return f"<DataBreachIncident(id={self.id}, incident_id={self.incident_id}, severity={self.severity}, status={self.status})>"
+
+
+# ============================================================================
+# Token Budget & Cost Tracking Models
+# ============================================================================
+
+
+class TokenUsage(Base):
+    """
+    Enterprise token usage tracking for LLM API calls.
+
+    Tracks every LLM request with detailed token counts, costs, and metadata
+    for cost analysis, budgeting, and billing purposes.
+    """
+    __tablename__ = "token_usage"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Request identifiers
+    request_id = Column(String(100), nullable=True, index=True)  # Correlation with audit logs
+    trace_id = Column(String(100), nullable=True, index=True)  # Distributed tracing ID
+    execution_id = Column(String(36), ForeignKey("executions.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # User and project context
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Service context
+    service_name = Column(String(100), nullable=True, index=True)  # osteon, myocyte, synapse, nucleus, etc.
+    endpoint = Column(String(255), nullable=True, index=True)  # /outline, /draft, /analyze, etc.
+    agent_type = Column(String(50), nullable=True, index=True)  # document, spreadsheet, presentation, scheduler
+
+    # LLM provider and model details
+    provider = Column(String(50), nullable=False, index=True)  # openai, anthropic, deepseek, ollama, local
+    model = Column(String(100), nullable=False, index=True)  # gpt-4o, claude-3-5-sonnet, deepseek-chat, etc.
+    model_version = Column(String(100), nullable=True)  # Model version if available
+
+    # Token counts
+    input_tokens = Column(Integer, nullable=False, default=0)  # Prompt tokens
+    output_tokens = Column(Integer, nullable=False, default=0)  # Completion tokens
+    total_tokens = Column(Integer, nullable=False, default=0)  # Total tokens (input + output)
+    cached_tokens = Column(Integer, nullable=True, default=0)  # Cached tokens (if supported)
+
+    # Cost breakdown (in USD)
+    input_cost = Column(Float, nullable=False, default=0.0)  # Cost for input tokens
+    output_cost = Column(Float, nullable=False, default=0.0)  # Cost for output tokens
+    total_cost = Column(Float, nullable=False, default=0.0, index=True)  # Total cost
+    currency = Column(String(3), default="USD")  # Currency code
+
+    # Pricing information (snapshot at time of request)
+    input_price_per_million = Column(Float, nullable=True)  # Price per 1M input tokens
+    output_price_per_million = Column(Float, nullable=True)  # Price per 1M output tokens
+
+    # Request metadata
+    prompt_length = Column(Integer, nullable=True)  # Character count of prompt
+    completion_length = Column(Integer, nullable=True)  # Character count of completion
+    duration_ms = Column(Float, nullable=True)  # API call duration
+    success = Column(Boolean, nullable=False, default=True, index=True)  # Request succeeded
+    error_message = Column(Text, nullable=True)  # Error details if failed
+
+    # Budget tracking
+    budget_id = Column(String(36), ForeignKey("budget_configs.id", ondelete="SET NULL"), nullable=True, index=True)
+    budget_exceeded = Column(Boolean, default=False, index=True)  # Was budget exceeded with this call?
+    fallback_used = Column(Boolean, default=False, index=True)  # Was model fallback triggered?
+    original_provider = Column(String(50), nullable=True)  # Original provider if fallback occurred
+    original_model = Column(String(100), nullable=True)  # Original model if fallback occurred
+
+    # Advanced features
+    json_mode = Column(Boolean, default=False)  # Was JSON mode enabled?
+    temperature = Column(Float, nullable=True)  # Sampling temperature used
+    max_tokens_requested = Column(Integer, nullable=True)  # Max tokens requested
+
+    # Aggregation helpers (for fast queries)
+    date = Column(DateTime(timezone=True), nullable=False, index=True)  # Date for daily aggregation
+    hour = Column(Integer, nullable=True, index=True)  # Hour of day (0-23) for hourly aggregation
+    day_of_week = Column(Integer, nullable=True)  # Day of week (0=Monday, 6=Sunday)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+    budget_config = relationship("BudgetConfig", foreign_keys=[budget_id], back_populates="usage_records")
+    execution = relationship("Execution", foreign_keys=[execution_id])
+
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        # User cost analysis
+        Index("idx_token_usage_user_date", "user_id", "date", "total_cost"),
+        # Project cost analysis
+        Index("idx_token_usage_project_date", "project_id", "date", "total_cost"),
+        # Provider/model analysis
+        Index("idx_token_usage_provider_model", "provider", "model", "date"),
+        # Service analysis
+        Index("idx_token_usage_service", "service_name", "endpoint", "date"),
+        # Hourly analysis
+        Index("idx_token_usage_hourly", "date", "hour", "total_cost"),
+        # Budget monitoring
+        Index("idx_token_usage_budget", "budget_id", "date", "budget_exceeded"),
+        # Fallback analysis
+        Index("idx_token_usage_fallback", "fallback_used", "original_provider", "date"),
+        # Success rate analysis
+        Index("idx_token_usage_success", "success", "provider", "date"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<TokenUsage(id={self.id}, provider={self.provider}, model={self.model}, "
+            f"tokens={self.total_tokens}, cost=${self.total_cost:.4f})>"
+        )
+
+
+class BudgetConfig(Base):
+    """
+    Budget configuration for token/cost limits per user or project.
+
+    Supports multiple budget types:
+    - User-level budgets (global per user)
+    - Project-level budgets (per project)
+    - Service-level budgets (per service/agent)
+    - Time-based budgets (hourly, daily, monthly)
+    """
+    __tablename__ = "budget_configs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Budget scope
+    budget_name = Column(String(255), nullable=False)  # Friendly name
+    budget_type = Column(String(50), nullable=False, index=True)  # user, project, service, global
+    scope_id = Column(String(36), nullable=True, index=True)  # user_id, project_id, or service_name
+
+    # Associated entities
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # Budget limits
+    limit_type = Column(String(50), nullable=False, index=True)  # cost, tokens
+    limit_period = Column(String(50), nullable=False, index=True)  # hourly, daily, weekly, monthly, total
+    limit_value = Column(Float, nullable=False)  # Budget limit (dollars or tokens)
+    currency = Column(String(3), default="USD")  # Currency for cost limits
+
+    # Soft limits and warnings (percentage of limit_value)
+    warning_threshold = Column(Float, default=0.8)  # 80% - trigger warning alert
+    critical_threshold = Column(Float, default=0.95)  # 95% - trigger critical alert
+
+    # Hard limit enforcement
+    hard_limit_enabled = Column(Boolean, default=True)  # Reject requests when limit exceeded
+    block_on_exceeded = Column(Boolean, default=False)  # Completely block vs. fallback
+
+    # Model fallback strategy
+    enable_fallback = Column(Boolean, default=True)  # Enable automatic model fallback
+    fallback_provider = Column(String(50), nullable=True)  # Fallback provider (e.g., "deepseek", "ollama")
+    fallback_model = Column(String(100), nullable=True)  # Fallback model
+    fallback_threshold = Column(Float, default=0.9)  # 90% - start using fallback model
+
+    # Provider/model restrictions
+    allowed_providers = Column(JSON, nullable=True)  # List of allowed providers, null = all allowed
+    allowed_models = Column(JSON, nullable=True)  # List of allowed models, null = all allowed
+    blocked_providers = Column(JSON, nullable=True)  # List of blocked providers
+    blocked_models = Column(JSON, nullable=True)  # List of blocked models
+
+    # Cost optimization
+    prefer_cheaper_models = Column(Boolean, default=False)  # Prefer cheaper models when possible
+    max_cost_per_request = Column(Float, nullable=True)  # Maximum cost per single request
+
+    # Spike detection
+    enable_spike_detection = Column(Boolean, default=True)  # Detect unusual cost spikes
+    spike_threshold_multiplier = Column(Float, default=3.0)  # 3x average is considered a spike
+    spike_window_hours = Column(Integer, default=1)  # Look at last N hours for spike detection
+
+    # Budget reset
+    auto_reset = Column(Boolean, default=True)  # Auto-reset budget at start of new period
+    last_reset_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    next_reset_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Current usage (cached for performance)
+    current_usage = Column(Float, default=0.0)  # Current usage in this period
+    current_percentage = Column(Float, default=0.0, index=True)  # Percentage of limit used
+
+    # Alert configuration
+    alert_on_warning = Column(Boolean, default=True)  # Send alert at warning threshold
+    alert_on_critical = Column(Boolean, default=True)  # Send alert at critical threshold
+    alert_on_exceeded = Column(Boolean, default=True)  # Send alert when limit exceeded
+    alert_on_spike = Column(Boolean, default=True)  # Send alert on cost spike
+    alert_channels = Column(JSON, nullable=True)  # ["email", "slack", "pagerduty"]
+    alert_recipients = Column(JSON, nullable=True)  # List of email addresses or Slack channels
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_enforced = Column(Boolean, default=True, nullable=False)  # Actually enforce the budget
+    suspended_until = Column(DateTime(timezone=True), nullable=True)  # Temporary suspension
+
+    # Metadata
+    description = Column(Text, nullable=True)
+    created_by = Column(String(100), nullable=True)  # Admin who created budget
+    approved_by = Column(String(100), nullable=True)  # Manager who approved budget
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+    usage_records = relationship("TokenUsage", back_populates="budget_config", cascade="all, delete-orphan")
+    alerts = relationship("CostAlert", back_populates="budget_config", cascade="all, delete-orphan")
+
+    # Indexes
+    __table_args__ = (
+        # Find active budgets by type
+        Index("idx_budget_type_active", "budget_type", "is_active", "is_enforced"),
+        # Find budgets by user
+        Index("idx_budget_user", "user_id", "is_active"),
+        # Find budgets by project
+        Index("idx_budget_project", "project_id", "is_active"),
+        # Find budgets by scope
+        Index("idx_budget_scope", "budget_type", "scope_id", "is_active"),
+        # Monitor budget usage
+        Index("idx_budget_usage", "current_percentage", "is_active"),
+        # Budget reset scheduling
+        Index("idx_budget_reset", "next_reset_at", "auto_reset", "is_active"),
+        # Ensure unique budget per scope and period
+        Index("idx_budget_unique", "budget_type", "scope_id", "limit_period", unique=True),
+    )
+
+    def __repr__(self):
+        return (
+            f"<BudgetConfig(id={self.id}, name={self.budget_name}, type={self.budget_type}, "
+            f"limit={self.limit_value} {self.limit_type}/{self.limit_period}, "
+            f"usage={self.current_percentage:.1f}%)>"
+        )
+
+
+class CostAlert(Base):
+    """
+    Cost alert tracking for budget warnings, limit violations, and anomaly detection.
+
+    Tracks all cost-related alerts and their resolution status.
+    """
+    __tablename__ = "cost_alerts"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Alert classification
+    alert_type = Column(String(50), nullable=False, index=True)  # warning, critical, exceeded, spike, anomaly
+    severity = Column(String(20), nullable=False, index=True)  # low, medium, high, critical
+    status = Column(String(50), nullable=False, index=True)  # active, acknowledged, resolved, ignored
+
+    # Associated budget
+    budget_id = Column(String(36), ForeignKey("budget_configs.id", ondelete="CASCADE"), nullable=True, index=True)
+
+    # User and project context
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Alert details
+    title = Column(String(500), nullable=False)
+    message = Column(Text, nullable=False)
+    details = Column(JSON, nullable=True)  # Additional alert metadata
+
+    # Budget metrics at time of alert
+    budget_limit = Column(Float, nullable=True)  # Budget limit
+    current_usage = Column(Float, nullable=True)  # Usage at time of alert
+    usage_percentage = Column(Float, nullable=True, index=True)  # Percentage at time of alert
+    threshold_exceeded = Column(String(50), nullable=True)  # warning, critical, hard_limit
+
+    # Spike detection metrics
+    is_spike = Column(Boolean, default=False, index=True)
+    baseline_cost = Column(Float, nullable=True)  # Average cost before spike
+    spike_cost = Column(Float, nullable=True)  # Cost that triggered spike alert
+    spike_multiplier = Column(Float, nullable=True)  # How many times above baseline
+
+    # Token usage at time of alert
+    tokens_used = Column(Integer, nullable=True)
+    cost_incurred = Column(Float, nullable=True)
+
+    # Provider/model involved
+    provider = Column(String(50), nullable=True, index=True)
+    model = Column(String(100), nullable=True)
+
+    # Actions taken
+    action_taken = Column(String(100), nullable=True)  # fallback, blocked, allowed_with_warning, none
+    fallback_triggered = Column(Boolean, default=False)
+    request_blocked = Column(Boolean, default=False)
+
+    # Notification tracking
+    notifications_sent = Column(JSON, nullable=True)  # List of notification channels used
+    notification_timestamp = Column(DateTime(timezone=True), nullable=True)
+    notification_success = Column(Boolean, nullable=True)
+
+    # Alert lifecycle
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_by = Column(String(100), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    resolved_by = Column(String(100), nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+
+    # Auto-resolution
+    auto_resolved = Column(Boolean, default=False)
+    auto_resolved_reason = Column(String(255), nullable=True)
+
+    # Deduplication
+    alert_hash = Column(String(64), nullable=True, index=True)  # Hash for deduplication
+    duplicate_count = Column(Integer, default=1)  # How many times this alert fired
+    last_occurrence = Column(DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    triggered_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    budget_config = relationship("BudgetConfig", back_populates="alerts")
+    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("Project", foreign_keys=[project_id])
+
+    # Indexes
+    __table_args__ = (
+        # Active alerts by type
+        Index("idx_alert_type_status", "alert_type", "status", "triggered_at"),
+        # User alerts
+        Index("idx_alert_user", "user_id", "status", "triggered_at"),
+        # Project alerts
+        Index("idx_alert_project", "project_id", "status", "triggered_at"),
+        # Budget alerts
+        Index("idx_alert_budget", "budget_id", "status", "triggered_at"),
+        # Spike alerts
+        Index("idx_alert_spike", "is_spike", "status", "triggered_at"),
+        # Severity monitoring
+        Index("idx_alert_severity", "severity", "status", "triggered_at"),
+        # Deduplication
+        Index("idx_alert_dedup", "alert_hash", "status", "triggered_at"),
+        # Unresolved alerts
+        Index("idx_alert_unresolved", "status", "severity", "triggered_at"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<CostAlert(id={self.id}, type={self.alert_type}, severity={self.severity}, "
+            f"status={self.status}, usage={self.usage_percentage:.1f}%)>"
+        )
