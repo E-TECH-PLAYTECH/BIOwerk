@@ -198,6 +198,34 @@ class Settings(BaseSettings):
     health_check_timeout: float = Field(default=5.0, description="Timeout for health checks in seconds")
     health_startup_grace_period: int = Field(default=30, description="Grace period for startup health checks in seconds")
 
+    # Token Budget & Cost Tracking Configuration
+    budget_enabled: bool = Field(default=True, description="Enable token budget enforcement")
+    budget_cost_tracking: bool = Field(default=True, description="Track costs for all LLM requests")
+    budget_enforce_limits: bool = Field(default=True, description="Enforce budget limits (vs. tracking only)")
+    budget_auto_fallback: bool = Field(default=True, description="Enable automatic model fallback")
+    budget_default_fallback_provider: str = Field(default="deepseek", description="Default fallback provider")
+    budget_default_fallback_model: str = Field(default="deepseek-chat", description="Default fallback model")
+    budget_spike_detection: bool = Field(default=True, description="Enable cost spike detection")
+    budget_spike_multiplier: float = Field(default=3.0, description="Cost spike threshold multiplier")
+    budget_spike_window_hours: int = Field(default=1, description="Window for spike detection (hours)")
+    budget_auto_reset: bool = Field(default=True, description="Automatically reset budgets at period boundaries")
+    budget_alert_dedup_hours: int = Field(default=1, description="Hours to deduplicate similar alerts")
+
+    # Default Budget Limits (if no budget configured)
+    budget_default_enabled: bool = Field(default=False, description="Enable default global budget")
+    budget_default_limit_type: str = Field(default="cost", description="Default limit type (cost or tokens)")
+    budget_default_limit_period: str = Field(default="monthly", description="Default limit period")
+    budget_default_limit_value: float = Field(default=100.0, description="Default budget limit value")
+    budget_default_warning_threshold: float = Field(default=0.8, description="Warning threshold (0.0-1.0)")
+    budget_default_critical_threshold: float = Field(default=0.95, description="Critical threshold (0.0-1.0)")
+
+    # Cost Optimization
+    budget_prefer_cheaper: bool = Field(default=False, description="Prefer cheaper models when possible")
+    budget_max_cost_per_request: Optional[float] = Field(default=None, description="Maximum cost per request (USD)")
+
+    # Admin Override
+    budget_admin_bypass: bool = Field(default=True, description="Allow admins to bypass budgets")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
