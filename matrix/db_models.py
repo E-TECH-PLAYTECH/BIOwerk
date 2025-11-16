@@ -269,3 +269,409 @@ class AuditLog(Base):
             f"action={self.event_action}, status={self.event_status}, "
             f"user_id={self.user_id}, resource={self.resource_type}:{self.resource_id})>"
         )
+
+
+# ============================================================================
+# GDPR Compliance Models
+# ============================================================================
+
+
+class ConsentRecord(Base):
+    """
+    GDPR Article 7 - Conditions for consent.
+
+    Tracks user consent for various data processing activities.
+    Consent must be freely given, specific, informed, and unambiguous.
+    """
+    __tablename__ = "consent_records"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Consent details
+    purpose = Column(String(100), nullable=False, index=True)  # analytics, marketing, profiling, etc.
+    purpose_description = Column(Text, nullable=False)  # Clear description shown to user
+    consent_given = Column(Boolean, nullable=False, index=True)
+    consent_method = Column(String(50), nullable=False)  # checkbox, api, email, etc.
+
+    # Legal basis (GDPR Article 6)
+    legal_basis = Column(String(50), nullable=False)  # consent, contract, legal_obligation, vital_interest, public_task, legitimate_interest
+
+    # Granular consent categories
+    consent_category = Column(String(50), nullable=False, index=True)  # essential, functional, analytics, marketing, third_party
+
+    # Withdrawal tracking
+    withdrawn_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    withdrawal_method = Column(String(50), nullable=True)
+
+    # Audit trail
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    consent_version = Column(String(20), nullable=False)  # Version of terms/privacy policy
+
+    # Expiration (some consents may expire after a period)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Timestamps
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_consent_user_purpose", "user_id", "purpose", "consent_given"),
+        Index("idx_consent_active", "user_id", "consent_given", "withdrawn_at"),
+        Index("idx_consent_category", "consent_category", "consent_given"),
+        Index("idx_consent_expiration", "expires_at", "consent_given"),
+    )
+
+    def __repr__(self):
+        return f"<ConsentRecord(id={self.id}, user_id={self.user_id}, purpose={self.purpose}, given={self.consent_given})>"
+
+
+class DataRequest(Base):
+    """
+    GDPR Articles 15, 17, 20 - Data Subject Access Requests (DSAR).
+
+    Tracks requests for:
+    - Article 15: Right to access (data export)
+    - Article 17: Right to erasure (right to be forgotten)
+    - Article 20: Right to data portability
+    """
+    __tablename__ = "data_requests"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Request details
+    request_type = Column(String(50), nullable=False, index=True)  # access, erasure, portability, rectification, restriction
+    request_status = Column(String(50), nullable=False, index=True)  # pending, in_progress, completed, rejected, failed
+    priority = Column(String(20), default="normal")  # low, normal, high, urgent
+
+    # Request metadata
+    description = Column(Text, nullable=True)  # User's description/reason
+    requested_data_types = Column(JSON, nullable=True)  # Specific data types requested (for access/portability)
+
+    # Processing details
+    assigned_to = Column(String(100), nullable=True)  # DPO or admin handling request
+    rejection_reason = Column(Text, nullable=True)  # If rejected, why
+
+    # Completion details
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    completed_by = Column(String(100), nullable=True)  # Admin who completed
+
+    # Data export details (for access/portability requests)
+    export_format = Column(String(20), nullable=True)  # json, csv, pdf
+    export_file_path = Column(String(500), nullable=True)  # Path to exported data (encrypted storage)
+    export_file_hash = Column(String(64), nullable=True)  # SHA-256 hash for integrity
+    export_expires_at = Column(DateTime(timezone=True), nullable=True)  # Temporary download link expiration
+    download_count = Column(Integer, default=0)  # Track downloads
+
+    # Erasure details (for deletion requests)
+    erasure_method = Column(String(50), nullable=True)  # soft_delete, anonymization, hard_delete
+    data_deleted = Column(JSON, nullable=True)  # Summary of deleted data
+    anonymization_applied = Column(Boolean, default=False)
+
+    # Legal holds (prevent deletion during investigations)
+    legal_hold = Column(Boolean, default=False, nullable=False, index=True)
+    legal_hold_reason = Column(Text, nullable=True)
+    legal_hold_placed_at = Column(DateTime(timezone=True), nullable=True)
+    legal_hold_released_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Verification (identity verification required for sensitive requests)
+    verification_required = Column(Boolean, default=True, nullable=False)
+    verification_method = Column(String(50), nullable=True)  # email, phone, id_document, video_call
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+    verified_by = Column(String(100), nullable=True)
+
+    # Audit trail
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    # SLA tracking (GDPR requires response within 30 days)
+    due_date = Column(DateTime(timezone=True), nullable=False, index=True)  # Auto-set to +30 days
+    sla_breached = Column(Boolean, default=False, nullable=False, index=True)
+
+    # Timestamps
+    requested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_data_request_user", "user_id", "request_type", "request_status"),
+        Index("idx_data_request_status", "request_status", "due_date"),
+        Index("idx_data_request_sla", "sla_breached", "request_status"),
+        Index("idx_data_request_legal_hold", "legal_hold", "user_id"),
+    )
+
+    def __repr__(self):
+        return f"<DataRequest(id={self.id}, type={self.request_type}, status={self.request_status}, user_id={self.user_id})>"
+
+
+class DataRetentionPolicy(Base):
+    """
+    GDPR Article 5(1)(e) - Storage limitation principle.
+
+    Defines retention policies for different data types.
+    Data should be kept no longer than necessary for the purposes for which it is processed.
+    """
+    __tablename__ = "data_retention_policies"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Policy details
+    policy_name = Column(String(255), nullable=False, unique=True, index=True)
+    data_type = Column(String(100), nullable=False, index=True)  # user_data, audit_logs, artifacts, sessions, etc.
+    description = Column(Text, nullable=False)
+
+    # Retention rules
+    retention_period_days = Column(Integer, nullable=False)  # How long to keep data
+    retention_basis = Column(String(100), nullable=False)  # legal_requirement, business_need, consent, contract
+
+    # Auto-deletion settings
+    auto_delete_enabled = Column(Boolean, default=True, nullable=False)
+    delete_method = Column(String(50), nullable=False, default="soft_delete")  # soft_delete, anonymization, hard_delete
+
+    # Exceptions
+    legal_hold_exempt = Column(Boolean, default=False, nullable=False)  # Can this be deleted during legal holds?
+    minimum_retention_days = Column(Integer, nullable=True)  # Minimum retention (e.g., for legal compliance)
+
+    # Applicable regulations
+    regulations = Column(JSON, nullable=True)  # ["GDPR", "HIPAA", "PCI-DSS", "SOX"]
+
+    # Policy status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    # Archival settings
+    archive_after_days = Column(Integer, nullable=True)  # Archive before deletion
+    archive_location = Column(String(255), nullable=True)  # S3 bucket, cold storage, etc.
+
+    # Approval and compliance
+    approved_by = Column(String(100), nullable=True)  # DPO or legal team approval
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    last_reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    next_review_date = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_retention_data_type", "data_type", "is_active"),
+        Index("idx_retention_review", "next_review_date", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<DataRetentionPolicy(id={self.id}, name={self.policy_name}, retention_days={self.retention_period_days})>"
+
+
+class PrivacySettings(Base):
+    """
+    User privacy preferences and settings.
+
+    Allows users to control how their data is used and shared.
+    """
+    __tablename__ = "privacy_settings"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Communication preferences
+    email_marketing_enabled = Column(Boolean, default=False, nullable=False)
+    email_product_updates = Column(Boolean, default=True, nullable=False)
+    email_security_alerts = Column(Boolean, default=True, nullable=False)
+
+    # Data processing preferences
+    analytics_enabled = Column(Boolean, default=True, nullable=False)
+    personalization_enabled = Column(Boolean, default=True, nullable=False)
+    third_party_sharing = Column(Boolean, default=False, nullable=False)
+
+    # AI/ML processing
+    ai_training_opt_in = Column(Boolean, default=False, nullable=False)  # Can data be used for AI training?
+    profiling_enabled = Column(Boolean, default=False, nullable=False)  # Automated decision-making
+
+    # Data retention preferences
+    custom_retention_period = Column(Integer, nullable=True)  # User-requested shorter retention (days)
+
+    # Export/portability preferences
+    preferred_export_format = Column(String(20), default="json")  # json, csv, pdf
+
+    # Privacy level presets
+    privacy_level = Column(String(20), default="balanced")  # minimal, balanced, convenience
+
+    # Cookie preferences
+    essential_cookies = Column(Boolean, default=True, nullable=False)  # Always true (required for functionality)
+    functional_cookies = Column(Boolean, default=True, nullable=False)
+    analytics_cookies = Column(Boolean, default=False, nullable=False)
+    marketing_cookies = Column(Boolean, default=False, nullable=False)
+
+    # Session preferences
+    remember_me = Column(Boolean, default=False, nullable=False)
+    session_timeout_minutes = Column(Integer, default=60)
+
+    # Data sharing controls
+    share_with_partners = Column(Boolean, default=False, nullable=False)
+    share_for_research = Column(Boolean, default=False, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    last_reviewed_at = Column(DateTime(timezone=True), nullable=True)  # User last reviewed settings
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    def __repr__(self):
+        return f"<PrivacySettings(id={self.id}, user_id={self.user_id}, privacy_level={self.privacy_level})>"
+
+
+class CookieConsent(Base):
+    """
+    Cookie consent tracking for GDPR compliance.
+
+    Tracks cookie consent per user session/device.
+    """
+    __tablename__ = "cookie_consents"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Session/device identification
+    session_id = Column(String(255), nullable=True, index=True)
+    device_fingerprint = Column(String(64), nullable=True, index=True)  # Hash of device characteristics
+
+    # Consent details
+    essential_accepted = Column(Boolean, default=True, nullable=False)  # Always true
+    functional_accepted = Column(Boolean, default=False, nullable=False)
+    analytics_accepted = Column(Boolean, default=False, nullable=False)
+    marketing_accepted = Column(Boolean, default=False, nullable=False)
+
+    # Consent metadata
+    consent_method = Column(String(50), nullable=False)  # banner, settings_page, implicit
+    banner_version = Column(String(20), nullable=False)  # Track which banner version was shown
+
+    # Geolocation (determines which privacy laws apply)
+    geo_country = Column(String(2), nullable=True)  # ISO 3166-1 alpha-2
+    geo_region = Column(String(100), nullable=True)
+
+    # Technical details
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+
+    # Expiration
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)  # Consents expire after 12 months
+
+    # Timestamps
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_cookie_consent_user", "user_id", "granted_at"),
+        Index("idx_cookie_consent_session", "session_id", "expires_at"),
+        Index("idx_cookie_consent_device", "device_fingerprint", "expires_at"),
+    )
+
+    def __repr__(self):
+        return f"<CookieConsent(id={self.id}, user_id={self.user_id}, analytics={self.analytics_accepted}, marketing={self.marketing_accepted})>"
+
+
+class DataBreachIncident(Base):
+    """
+    GDPR Article 33/34 - Breach notification requirements.
+
+    Tracks data breach incidents and notifications.
+    Must notify supervisory authority within 72 hours of becoming aware.
+    """
+    __tablename__ = "data_breach_incidents"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Incident details
+    incident_id = Column(String(50), nullable=False, unique=True, index=True)  # Public incident reference
+    severity = Column(String(20), nullable=False, index=True)  # low, medium, high, critical
+    status = Column(String(50), nullable=False, index=True)  # detected, investigating, contained, notified, resolved
+
+    # Description
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=False)
+    root_cause = Column(Text, nullable=True)
+
+    # Breach classification
+    breach_type = Column(String(100), nullable=False)  # unauthorized_access, data_loss, ransomware, insider_threat, etc.
+    attack_vector = Column(String(100), nullable=True)  # phishing, sql_injection, brute_force, etc.
+
+    # Impact assessment
+    affected_user_count = Column(Integer, nullable=True)
+    affected_data_types = Column(JSON, nullable=False)  # ["email", "password", "pii", "financial", "health"]
+    risk_to_individuals = Column(String(20), nullable=False)  # low, medium, high
+
+    # Affected users
+    affected_user_ids = Column(JSON, nullable=True)  # List of user IDs (encrypted)
+
+    # Containment
+    contained_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    containment_measures = Column(Text, nullable=True)
+
+    # Notification requirements
+    requires_authority_notification = Column(Boolean, nullable=False, index=True)  # Article 33
+    requires_individual_notification = Column(Boolean, nullable=False, index=True)  # Article 34
+
+    # Authority notification (72-hour deadline)
+    authority_notified_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    authority_notification_method = Column(String(50), nullable=True)
+    authority_reference_number = Column(String(100), nullable=True)
+    notification_deadline = Column(DateTime(timezone=True), nullable=True, index=True)
+    deadline_met = Column(Boolean, nullable=True, index=True)
+
+    # Individual notifications
+    individuals_notified_at = Column(DateTime(timezone=True), nullable=True)
+    individuals_notification_method = Column(String(50), nullable=True)  # email, mail, in_app
+    notification_template_id = Column(String(100), nullable=True)
+
+    # Remediation
+    remediation_steps = Column(JSON, nullable=True)
+    remediation_completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Responsible parties
+    discovered_by = Column(String(100), nullable=True)
+    assigned_to = Column(String(100), nullable=True)  # DPO, security team
+    dpo_notified_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Costs and impact
+    estimated_cost = Column(Float, nullable=True)
+    downtime_minutes = Column(Integer, nullable=True)
+
+    # Lessons learned
+    post_incident_review_completed = Column(Boolean, default=False)
+    lessons_learned = Column(Text, nullable=True)
+    preventive_measures = Column(JSON, nullable=True)
+
+    # Timestamps
+    detected_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=True)  # Estimated time breach occurred
+    resolved_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_breach_status", "status", "severity", "detected_at"),
+        Index("idx_breach_notification", "requires_authority_notification", "authority_notified_at"),
+        Index("idx_breach_deadline", "notification_deadline", "deadline_met"),
+    )
+
+    def __repr__(self):
+        return f"<DataBreachIncident(id={self.id}, incident_id={self.incident_id}, severity={self.severity}, status={self.status})>"
