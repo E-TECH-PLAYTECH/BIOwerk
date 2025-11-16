@@ -34,6 +34,26 @@ Need ongoing service insight? See [Operations](#operations) for observability an
 - The **Mesh gateway** exposes a unified API surface and routes messages to agents.
 - **Matrix** provides shared libs for canonicalization, hashing, and message schemas.
 
+### Service Mesh Resilience
+
+BIOwerk includes enterprise-grade resilience patterns for production deployments:
+
+- **Circuit Breaker**: Prevents cascading failures by failing fast when services are down
+- **Retry with Exponential Backoff**: Automatically retries transient failures
+- **Bulkhead Pattern**: Isolates resource pools to prevent one service from exhausting connections
+- **Health-Aware Routing**: Routes requests based on real-time service health
+
+All patterns include comprehensive Prometheus metrics for observability. See [docs/SERVICE_MESH_RESILIENCE.md](docs/SERVICE_MESH_RESILIENCE.md) for detailed documentation.
+
+**Configuration:**
+```bash
+# Enable all resilience patterns (default)
+CIRCUIT_BREAKER_ENABLED=true
+RETRY_ENABLED=true
+BULKHEAD_ENABLED=true
+HEALTH_CHECK_ENABLED=true
+```
+
 ## Determinism
 
 All service replies include a `state_hash = blake3-256(canonical_json(output))`.
