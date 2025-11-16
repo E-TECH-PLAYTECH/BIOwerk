@@ -49,6 +49,38 @@ services:
       timeout: 5s
       retries: 5
 
+  # Connection Pooling
+  pgbouncer:
+    build: ./pgbouncer
+    container_name: biowerk-pgbouncer
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=biowerk
+      - POSTGRES_PASSWORD=biowerk_dev_password
+      - POSTGRES_DB=biowerk
+      - PGBOUNCER_POOL_MODE=${PGBOUNCER_POOL_MODE:-transaction}
+      - PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN:-200}
+      - PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE:-25}
+      - PGBOUNCER_MIN_POOL_SIZE=${PGBOUNCER_MIN_POOL_SIZE:-10}
+      - PGBOUNCER_RESERVE_POOL_SIZE=${PGBOUNCER_RESERVE_POOL_SIZE:-10}
+      - PGBOUNCER_MAX_DB_CONNECTIONS=${PGBOUNCER_MAX_DB_CONNECTIONS:-50}
+      - PGBOUNCER_SERVER_IDLE_TIMEOUT=${PGBOUNCER_SERVER_IDLE_TIMEOUT:-600}
+      - PGBOUNCER_LOG_CONNECTIONS=${PGBOUNCER_LOG_CONNECTIONS:-1}
+      - PGBOUNCER_LOG_DISCONNECTIONS=${PGBOUNCER_LOG_DISCONNECTIONS:-1}
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/health-check.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # LLM Services
   ollama:
     image: ollama/ollama:latest
@@ -76,11 +108,12 @@ services:
       - AGENT_CIRCADIAN_URL=http://circadian:8004
       - AGENT_NUCLEUS_URL=http://nucleus:8005
       - AGENT_CHAPERONE_URL=http://chaperone:8006
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -104,7 +137,8 @@ services:
     container_name: biowerk-osteon
     ports: ["8001:8001"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -113,7 +147,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -127,7 +161,8 @@ services:
     container_name: biowerk-myocyte
     ports: ["8002:8002"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -136,7 +171,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -150,7 +185,8 @@ services:
     container_name: biowerk-synapse
     ports: ["8003:8003"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -159,7 +195,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -173,7 +209,8 @@ services:
     container_name: biowerk-circadian
     ports: ["8004:8004"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -182,7 +219,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -196,7 +233,8 @@ services:
     container_name: biowerk-nucleus
     ports: ["8005:8005"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -205,7 +243,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -219,7 +257,8 @@ services:
     container_name: biowerk-chaperone
     ports: ["8006:8006"]
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -228,7 +267,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -243,11 +282,13 @@ services:
     container_name: biowerk-larry
     ports: ["8007:8007"]
     environment:
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - LLM_PROVIDER=local
       - LOCAL_MODEL_PATH=./models
       - LOCAL_MODEL_NAME=phi2
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -259,11 +300,13 @@ services:
     container_name: biowerk-moe
     ports: ["8008:8008"]
     environment:
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - LLM_PROVIDER=local
       - LOCAL_MODEL_PATH=./models
       - LOCAL_MODEL_NAME=phi2
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy
@@ -281,11 +324,13 @@ services:
     container_name: biowerk-harry
     ports: ["8009:8009"]
     environment:
+      - POSTGRES_HOST=${POSTGRES_HOST:-pgbouncer}
+      - POSTGRES_PORT=${POSTGRES_PORT:-6432}
       - LLM_PROVIDER=local
       - LOCAL_MODEL_PATH=./models
       - LOCAL_MODEL_NAME=phi2
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       mongodb:
         condition: service_healthy

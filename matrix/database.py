@@ -26,17 +26,51 @@ _redis_client = None
 # ============================================================================
 
 def get_postgres_engine():
-    """Get or create PostgreSQL async engine."""
+    """
+    Get or create PostgreSQL async engine.
+
+    Connection pooling is optimized based on whether PgBouncer is in use:
+    - With PgBouncer (port 6432): Small application pools (5 + 5 overflow)
+      PgBouncer handles the actual connection pooling to PostgreSQL
+    - Direct PostgreSQL (port 5432): Larger application pools (10 + 20 overflow)
+      Each service manages its own connection pool
+
+    Using smaller pools with PgBouncer prevents over-subscription and
+    allows PgBouncer to efficiently multiplex connections.
+    """
     global _pg_engine
     if _pg_engine is None:
+        # Detect if using PgBouncer based on port
+        is_using_pgbouncer = settings.postgres_port == 6432 or settings.postgres_host == "pgbouncer"
+
+        if is_using_pgbouncer:
+            # Smaller pools when using PgBouncer
+            # PgBouncer handles connection pooling, so we don't need large app pools
+            pool_size = 5
+            max_overflow = 5
+            logger.info("Using PgBouncer - configuring small application connection pool")
+        else:
+            # Larger pools for direct PostgreSQL connection
+            pool_size = 10
+            max_overflow = 20
+            logger.info("Direct PostgreSQL connection - using standard connection pool")
+
         _pg_engine = create_async_engine(
             settings.postgres_url,
             echo=settings.log_level == "DEBUG",
             pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            # Pool recycle time - close connections after 1 hour
+            # Prevents stale connections and works well with PgBouncer
+            pool_recycle=3600,
+            # Timeout for getting connection from pool
+            pool_timeout=30,
         )
-        logger.info(f"PostgreSQL engine created: {settings.postgres_host}:{settings.postgres_port}")
+        logger.info(
+            f"PostgreSQL engine created: {settings.postgres_host}:{settings.postgres_port} "
+            f"(pool_size={pool_size}, max_overflow={max_overflow})"
+        )
     return _pg_engine
 
 
