@@ -5,6 +5,7 @@ from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
 from matrix.errors import InvalidInputError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.database import get_session_manager
 import time
 import json
 
@@ -12,8 +13,9 @@ app = FastAPI(title="Osteon")
 setup_instrumentation(app)
 logger = setup_logging("osteon")
 
-# State to track sections across requests
-session_state = {}
+# Redis-based session manager for persistent state across requests
+# Uses 1-hour TTL for document generation workflows
+session_mgr = get_session_manager("default")
 
 @app.post("/outline", response_model=Reply)
 async def outline(msg: Msg):
@@ -50,8 +52,8 @@ Generate a comprehensive outline with 5-8 main sections that would make for a we
 
         output = json.loads(response_text)
 
-        # Store outline in session state
-        session_state[msg.id] = {"outline": output.get("outline", [])}
+        # Store outline in Redis session for later retrieval
+        await session_mgr.set(msg.id, {"outline": output.get("outline", [])})
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, "osteon", True, duration_ms)

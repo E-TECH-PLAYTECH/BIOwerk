@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     cache_ttl: int = Field(default=300, description="Default cache TTL in seconds")
     cache_enabled: bool = Field(default=True, description="Enable caching")
 
+    # Session Configuration
+    session_enabled: bool = Field(default=True, description="Enable Redis-based sessions")
+    session_ttl_short: int = Field(default=900, description="Short session TTL in seconds (15 min)")
+    session_ttl_default: int = Field(default=3600, description="Default session TTL in seconds (1 hour)")
+    session_ttl_long: int = Field(default=28800, description="Long session TTL in seconds (8 hours)")
+    session_ttl_workflow: int = Field(default=86400, description="Workflow session TTL in seconds (24 hours)")
+    session_prefix: str = Field(default="session", description="Redis key prefix for sessions")
+
     # Application Configuration
     log_level: str = Field(default="INFO", description="Logging level")
     environment: str = Field(default="development", description="Environment (development, staging, production)")
