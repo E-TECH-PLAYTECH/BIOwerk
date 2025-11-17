@@ -5,9 +5,9 @@ services:
     image: postgres:16-alpine
     container_name: biowerk-postgres
     environment:
-      POSTGRES_USER: biowerk
-      POSTGRES_PASSWORD: biowerk_dev_password
-      POSTGRES_DB: biowerk
+      POSTGRES_USER: ${POSTGRES_USER:-biowerk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - see .env.example}
+      POSTGRES_DB: ${POSTGRES_DB:-biowerk}
     ports:
       - "5432:5432"
     volumes:
@@ -22,9 +22,9 @@ services:
     image: mongo:7.0
     container_name: biowerk-mongodb
     environment:
-      MONGO_INITDB_ROOT_USERNAME: biowerk
-      MONGO_INITDB_ROOT_PASSWORD: biowerk_dev_password
-      MONGO_INITDB_DATABASE: biowerk
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:-biowerk}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required - see .env.example}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-biowerk}
     ports:
       - "27017:27017"
     volumes:
@@ -56,9 +56,9 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=biowerk
-      - POSTGRES_PASSWORD=biowerk_dev_password
-      - POSTGRES_DB=biowerk
+      - POSTGRES_USER=${POSTGRES_USER:-biowerk}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - see .env.example}
+      - POSTGRES_DB=${POSTGRES_DB:-biowerk}
       - PGBOUNCER_POOL_MODE=${PGBOUNCER_POOL_MODE:-transaction}
       - PGBOUNCER_MAX_CLIENT_CONN=${PGBOUNCER_MAX_CLIENT_CONN:-200}
       - PGBOUNCER_DEFAULT_POOL_SIZE=${PGBOUNCER_DEFAULT_POOL_SIZE:-25}
@@ -126,7 +126,7 @@ services:
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
       - RATE_LIMIT_STRATEGY=${RATE_LIMIT_STRATEGY:-sliding_window}
       # Security Configuration
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key-change-in-production}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required - see .env.example}
       - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
       - ENVIRONMENT=${ENVIRONMENT:-development}
     volumes:
@@ -306,7 +306,7 @@ services:
       - MONGO_HOST=mongodb
       - REDIS_HOST=redis
       # CRITICAL: Use KMS in production (AWS Secrets Manager, Azure Key Vault, etc.)
-      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:-dev_key_change_in_production_min_32_chars}
+      - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:?ENCRYPTION_MASTER_KEY is required - see .env.example}
       - ENCRYPTION_KEY_ROTATION_DAYS=${ENCRYPTION_KEY_ROTATION_DAYS:-90}
       # GDPR Configuration
       - GDPR_EXPORT_BASE_PATH=/var/gdpr_exports
@@ -489,8 +489,8 @@ services:
       - alertmanager_data:/alertmanager
     environment:
       # PagerDuty configuration
-      - PAGERDUTY_SERVICE_KEY=${PAGERDUTY_SERVICE_KEY:-your-pagerduty-service-key}
-      - PAGERDUTY_SECURITY_SERVICE_KEY=${PAGERDUTY_SECURITY_SERVICE_KEY:-your-pagerduty-security-service-key}
+      - PAGERDUTY_SERVICE_KEY=${PAGERDUTY_SERVICE_KEY:-}
+      - PAGERDUTY_SECURITY_SERVICE_KEY=${PAGERDUTY_SECURITY_SERVICE_KEY:-}
       # SMTP configuration for email alerts
       - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com:587}
       - SMTP_USERNAME=${SMTP_USERNAME:-}
@@ -536,12 +536,12 @@ services:
     environment:
       # Admin credentials (CHANGE IN PRODUCTION)
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required - see .env.example}
       # Server configuration
       - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_SERVER_DOMAIN=localhost
       # Security
-      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:-changeme}
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY:?GRAFANA_SECRET_KEY is required - see .env.example}
       - GF_SECURITY_DISABLE_GRAVATAR=true
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=false
@@ -550,7 +550,7 @@ services:
       - GF_DATABASE_HOST=${GRAFANA_DB_HOST:-postgres:5432}
       - GF_DATABASE_NAME=${GRAFANA_DB_NAME:-grafana}
       - GF_DATABASE_USER=${GRAFANA_DB_USER:-biowerk}
-      - GF_DATABASE_PASSWORD=${GRAFANA_DB_PASSWORD:-biowerk_dev_password}
+      - GF_DATABASE_PASSWORD=${GRAFANA_DB_PASSWORD:-}
       # Provisioning
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
       # Analytics
@@ -586,7 +586,7 @@ services:
     ports:
       - "9187:9187"
     environment:
-      - DATA_SOURCE_NAME=postgresql://biowerk:biowerk_dev_password@postgres:5432/biowerk?sslmode=disable
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-biowerk}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/${POSTGRES_DB:-biowerk}?sslmode=disable
       - PG_EXPORTER_EXTEND_QUERY_PATH=/etc/postgres_exporter/queries.yaml
     depends_on:
       postgres:
@@ -623,9 +623,9 @@ services:
     ports:
       - "9216:9216"
     environment:
-      - MONGODB_URI=mongodb://biowerk:biowerk_dev_password@mongodb:27017/biowerk
+      - MONGODB_URI=mongodb://${MONGO_INITDB_ROOT_USERNAME:-biowerk}:${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD required}@mongodb:27017/${MONGO_INITDB_DATABASE:-biowerk}
     command:
-      - '--mongodb.uri=mongodb://biowerk:biowerk_dev_password@mongodb:27017/biowerk'
+      - '--mongodb.uri=mongodb://${MONGO_INITDB_ROOT_USERNAME:-biowerk}:${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD required}@mongodb:27017/${MONGO_INITDB_DATABASE:-biowerk}'
       - '--collect-all'
       - '--compatible-mode'
     depends_on:
@@ -647,9 +647,9 @@ services:
     environment:
       - PGBOUNCER_EXPORTER_HOST=pgbouncer
       - PGBOUNCER_EXPORTER_PORT=6432
-      - PGBOUNCER_USER=biowerk
-      - PGBOUNCER_PASS=biowerk_dev_password
-      - DATABASE_URL=postgresql://biowerk:biowerk_dev_password@pgbouncer:6432/pgbouncer?sslmode=disable
+      - PGBOUNCER_USER=${POSTGRES_USER:-biowerk}
+      - PGBOUNCER_PASS=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-biowerk}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@pgbouncer:6432/pgbouncer?sslmode=disable
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -712,18 +712,18 @@ services:
       # PostgreSQL configuration
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
-      - POSTGRES_USER=biowerk
-      - POSTGRES_PASSWORD=biowerk_dev_password
-      - POSTGRES_DB=biowerk
+      - POSTGRES_USER=${POSTGRES_USER:-biowerk}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+      - POSTGRES_DB=${POSTGRES_DB:-biowerk}
       - POSTGRES_BACKUP_ENABLED=${POSTGRES_BACKUP_ENABLED:-true}
       - POSTGRES_BACKUP_SCHEDULE=${POSTGRES_BACKUP_SCHEDULE:-0 2 * * *}
 
       # MongoDB configuration
       - MONGODB_HOST=mongodb
       - MONGODB_PORT=27017
-      - MONGODB_USER=biowerk
-      - MONGODB_PASSWORD=biowerk_dev_password
-      - MONGODB_DB=biowerk
+      - MONGODB_USER=${MONGO_INITDB_ROOT_USERNAME:-biowerk}
+      - MONGODB_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD required}
+      - MONGODB_DB=${MONGO_INITDB_DATABASE:-biowerk}
       - MONGODB_BACKUP_ENABLED=${MONGODB_BACKUP_ENABLED:-true}
       - MONGODB_BACKUP_SCHEDULE=${MONGODB_BACKUP_SCHEDULE:-30 2 * * *}
 
