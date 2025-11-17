@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BIOwerk Control Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
+            color: #e0e0e0;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #252525;
+            padding: 20px;
+            border-right: 1px solid #3a3a3a;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .nav-item {
+            padding: 12px 15px;
+            margin: 5px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .nav-item:hover {
+            background: #333;
+        }
+
+        .nav-item.active {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+
+        .header {
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .status-running {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-stopped {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-starting {
+            background: #ff9800;
+            color: white;
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-primary {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+        }
+
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .service-card {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .service-card:hover {
+            border-color: #4CAF50;
+            transform: translateY(-2px);
+        }
+
+        .service-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .service-name {
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .service-status {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .service-status.running {
+            background: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+        }
+
+        .service-status.stopped {
+            background: #f44336;
+        }
+
+        .service-info {
+            font-size: 12px;
+            color: #999;
+            margin-top: 10px;
+        }
+
+        .service-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .service-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            background: #333;
+            color: white;
+            transition: all 0.3s;
+        }
+
+        .service-btn:hover {
+            background: #444;
+        }
+
+        .logs-container {
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin: 20px 0;
+        }
+
+        .log-line {
+            padding: 2px 0;
+            color: #aaa;
+        }
+
+        .quick-links {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .quick-link {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .quick-link:hover {
+            border-color: #2196F3;
+            transform: translateY(-2px);
+        }
+
+        .quick-link-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .docker-status {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+
+        .alert-error {
+            background: #f443364d;
+            border: 1px solid #f44336;
+        }
+
+        .alert-success {
+            background: #4caf504d;
+            border: 1px solid #4CAF50;
+        }
+
+        .alert-info {
+            background: #2196f34d;
+            border: 1px solid #2196F3;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .settings-form {
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="logo">🧬 BIOwerk</div>
+            <div class="nav-item active" data-page="dashboard">Dashboard</div>
+            <div class="nav-item" data-page="services">Services</div>
+            <div class="nav-item" data-page="logs">Logs</div>
+            <div class="nav-item" data-page="links">Quick Links</div>
+            <div class="nav-item" data-page="settings">Settings</div>
+        </div>
+
+        <div class="main-content">
+            <!-- Dashboard Page -->
+            <div id="dashboard-page" class="page">
+                <div class="header">
+                    <h1>BIOwerk Control Panel</h1>
+                    <p>Manage your Bio-Themed Agentic Office Suite</p>
+                </div>
+
+                <div id="docker-status-container" class="docker-status">
+                    <strong>Docker Status:</strong> <span id="docker-status">Checking...</span>
+                </div>
+
+                <div id="alert-container"></div>
+
+                <div class="control-buttons">
+                    <button class="btn btn-primary" id="start-btn">
+                        ▶️ Start Services
+                    </button>
+                    <button class="btn btn-danger" id="stop-btn">
+                        ⏹️ Stop Services
+                    </button>
+                    <button class="btn btn-warning" id="restart-btn">
+                        🔄 Restart Services
+                    </button>
+                    <button class="btn btn-secondary" id="refresh-btn">
+                        🔃 Refresh Status
+                    </button>
+                </div>
+
+                <h2>Service Status</h2>
+                <div id="services-container" class="services-grid"></div>
+            </div>
+
+            <!-- Services Page -->
+            <div id="services-page" class="page hidden">
+                <div class="header">
+                    <h1>Services Management</h1>
+                </div>
+                <div id="services-detail-container" class="services-grid"></div>
+            </div>
+
+            <!-- Logs Page -->
+            <div id="logs-page" class="page hidden">
+                <div class="header">
+                    <h1>Service Logs</h1>
+                </div>
+                <div class="control-buttons">
+                    <button class="btn btn-secondary" id="view-all-logs">All Services</button>
+                    <button class="btn btn-secondary" id="clear-logs">Clear Logs</button>
+                </div>
+                <div id="logs-display" class="logs-container"></div>
+            </div>
+
+            <!-- Quick Links Page -->
+            <div id="links-page" class="page hidden">
+                <div class="header">
+                    <h1>Quick Links</h1>
+                </div>
+                <div class="quick-links">
+                    <a class="quick-link" data-url="http://localhost:8080/docs">
+                        <div class="quick-link-icon">📚</div>
+                        <div>API Documentation</div>
+                    </a>
+                    <a class="quick-link" data-url="http://localhost:3000">
+                        <div class="quick-link-icon">📊</div>
+                        <div>Grafana Dashboard</div>
+                    </a>
+                    <a class="quick-link" data-url="http://localhost:9090">
+                        <div class="quick-link-icon">📈</div>
+                        <div>Prometheus</div>
+                    </a>
+                    <a class="quick-link" data-url="http://localhost:8080/v1/osteon/draft">
+                        <div class="quick-link-icon">📝</div>
+                        <div>Osteon Writer</div>
+                    </a>
+                    <a class="quick-link" data-url="http://localhost:8080/v1/myocyte/analyze">
+                        <div class="quick-link-icon">📊</div>
+                        <div>Myocyte Analysis</div>
+                    </a>
+                    <a class="quick-link" data-url="http://localhost:8080/v1/synapse/create">
+                        <div class="quick-link-icon">🎨</div>
+                        <div>Synapse Presentation</div>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div id="settings-page" class="page hidden">
+                <div class="header">
+                    <h1>Settings</h1>
+                </div>
+                <div class="settings-form">
+                    <div class="form-group">
+                        <label>Configuration File</label>
+                        <button class="btn btn-secondary" id="open-config-btn">Open .env File</button>
+                        <p style="margin-top: 10px; font-size: 12px; color: #999;">
+                            Edit environment variables, API keys, and service configuration
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>Docker Compose File</label>
+                        <p style="font-size: 12px; color: #999;">
+                            Located at: <code id="compose-path"></code>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Page navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+
+                document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+                const page = item.getAttribute('data-page');
+                document.getElementById(`${page}-page`).classList.remove('hidden');
+            });
+        });
+
+        // Control buttons
+        document.getElementById('start-btn').addEventListener('click', () => {
+            ipcRenderer.send('start-services');
+        });
+
+        document.getElementById('stop-btn').addEventListener('click', () => {
+            ipcRenderer.send('stop-services');
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            ipcRenderer.send('restart-services');
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', () => {
+            ipcRenderer.send('check-status');
+        });
+
+        document.getElementById('view-all-logs').addEventListener('click', () => {
+            ipcRenderer.send('view-logs', null);
+        });
+
+        document.getElementById('clear-logs').addEventListener('click', () => {
+            document.getElementById('logs-display').innerHTML = '';
+        });
+
+        document.getElementById('open-config-btn').addEventListener('click', () => {
+            ipcRenderer.send('open-config');
+        });
+
+        // Quick links
+        document.querySelectorAll('.quick-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const url = link.getAttribute('data-url');
+                ipcRenderer.send('open-url', url);
+            });
+        });
+
+        // IPC Listeners
+        ipcRenderer.on('docker-status', (event, data) => {
+            const statusEl = document.getElementById('docker-status');
+            if (data.installed) {
+                statusEl.innerHTML = `<span style="color: #4CAF50;">✓ Installed</span> - ${data.version}`;
+            } else {
+                statusEl.innerHTML = `<span style="color: #f44336;">✗ Not Installed</span>`;
+                showAlert('Docker is not installed. Please install Docker Desktop.', 'error');
+            }
+        });
+
+        ipcRenderer.on('docker-daemon-status', (event, data) => {
+            const statusEl = document.getElementById('docker-status');
+            if (!data.running) {
+                statusEl.innerHTML += ` <span style="color: #ff9800;">(Daemon not running)</span>`;
+                showAlert('Docker daemon is not running. Please start Docker.', 'error');
+            }
+        });
+
+        ipcRenderer.on('services-status', (event, services) => {
+            updateServicesDisplay(services);
+        });
+
+        ipcRenderer.on('operation-status', (event, data) => {
+            showAlert(data.message, data.status === 'error' ? 'error' : 'success');
+        });
+
+        ipcRenderer.on('operation-log', (event, log) => {
+            appendLog(log);
+        });
+
+        ipcRenderer.on('service-logs', (event, data) => {
+            appendLog(`[${data.service}] ${data.log}`);
+        });
+
+        // Helper functions
+        function updateServicesDisplay(services) {
+            const container = document.getElementById('services-container');
+            const detailContainer = document.getElementById('services-detail-container');
+
+            container.innerHTML = '';
+            detailContainer.innerHTML = '';
+
+            for (const [key, service] of Object.entries(services)) {
+                const card = createServiceCard(key, service);
+                container.appendChild(card.cloneNode(true));
+                detailContainer.appendChild(card.cloneNode(true));
+            }
+        }
+
+        function createServiceCard(key, service) {
+            const card = document.createElement('div');
+            card.className = 'service-card';
+            card.innerHTML = `
+                <div class="service-header">
+                    <div class="service-name">${service.name}</div>
+                    <div class="service-status ${service.status}"></div>
+                </div>
+                <div class="service-info">
+                    Status: <strong>${service.status}</strong><br>
+                    URL: <code>${service.url}</code>
+                </div>
+                <div class="service-actions">
+                    <button class="service-btn" onclick="openUrl('${service.url}')">Open</button>
+                    <button class="service-btn" onclick="viewServiceLogs('${key}')">Logs</button>
+                </div>
+            `;
+            return card;
+        }
+
+        function showAlert(message, type) {
+            const container = document.getElementById('alert-container');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            container.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function appendLog(log) {
+            const logsDisplay = document.getElementById('logs-display');
+            const logLine = document.createElement('div');
+            logLine.className = 'log-line';
+            logLine.textContent = log;
+            logsDisplay.appendChild(logLine);
+            logsDisplay.scrollTop = logsDisplay.scrollHeight;
+        }
+
+        function openUrl(url) {
+            ipcRenderer.send('open-url', url);
+        }
+
+        function viewServiceLogs(service) {
+            // Switch to logs page
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelector('[data-page="logs"]').classList.add('active');
+            document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+            document.getElementById('logs-page').classList.remove('hidden');
+
+            // Request logs
+            ipcRenderer.send('view-logs', service);
+        }
+
+        // Initial status check
+        setTimeout(() => {
+            ipcRenderer.send('check-status');
+        }, 1000);
+    </script>
+</body>
+</html>
