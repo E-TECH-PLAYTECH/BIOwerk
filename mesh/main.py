@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os, httpx, time
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
@@ -25,6 +26,8 @@ from matrix.auth_dependencies import (
 from matrix.db_models import User
 from sqlalchemy.ext.asyncio import AsyncSession
 from matrix.versioning import version_middleware, get_version_from_request
+from matrix.security_headers import create_security_headers_middleware, SecurityHeadersConfig
+from matrix.audit import get_audit_logger, EventType, EventCategory, EventStatus, Severity, AuditContext
 
 # Agent URLs configuration
 AGENT_URLS = {
@@ -119,12 +122,144 @@ app = FastAPI(title="Mesh Gateway", lifespan=lifespan)
 setup_instrumentation(app, service_name="mesh", service_version="1.0.0")
 logger = setup_logging("mesh")
 
+# ============================================================================
+# CORS Configuration
+# ============================================================================
+# Configure allowed origins based on environment
+if settings.environment == "production":
+    # In production, use explicit allowed origins (no wildcard)
+    allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+    allowed_origins = [origin.strip() for origin in allowed_origins if origin.strip()]
+    if not allowed_origins:
+        logger.warning(
+            "No CORS_ALLOWED_ORIGINS configured in production. "
+            "CORS will be disabled. Set CORS_ALLOWED_ORIGINS environment variable."
+        )
+else:
+    # In development, allow all origins for easier testing
+    allowed_origins = ["*"]
+    logger.info("CORS configured for development - allowing all origins")
+
+# Only add CORS middleware if origins are configured
+if allowed_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,  # Allow cookies and authorization headers
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-API-Key",
+            "X-Request-ID",
+            "X-Correlation-ID",
+            "Accept",
+            "Origin",
+            "User-Agent",
+            "DNT",
+            "Cache-Control",
+            "X-Requested-With",
+        ],
+        max_age=600,  # Cache preflight requests for 10 minutes
+    )
+    logger.info(f"CORS middleware configured with origins: {allowed_origins}")
+
+# ============================================================================
+# Security Headers Middleware
+# ============================================================================
+app.add_middleware(create_security_headers_middleware())
+logger.info("Security headers middleware configured")
+
 # Add API versioning middleware
 app.middleware("http")(version_middleware)
 
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="mesh", version="1.0.0")
+
+# ============================================================================
+# CSP Violation Reporting Endpoint
+# ============================================================================
+
+@app.post("/api/csp-report")
+async def csp_report(
+    request: Request,
+    db: AsyncSession = Depends(get_postgres_session)
+):
+    """
+    Endpoint for receiving CSP violation reports.
+
+    This endpoint receives reports from browsers when Content-Security-Policy
+    violations occur. All violations are logged to the audit system for
+    security monitoring and analysis.
+    """
+    try:
+        # Parse CSP violation report
+        report_data = await request.json()
+
+        # Extract CSP report from the envelope
+        csp_report = report_data.get("csp-report", {})
+
+        # Log the violation
+        logger.warning(
+            f"CSP Violation: {csp_report.get('violated-directive', 'unknown')} "
+            f"blocked {csp_report.get('blocked-uri', 'unknown')} "
+            f"on {csp_report.get('document-uri', 'unknown')}"
+        )
+
+        # Get audit logger and log to audit system
+        audit_logger = get_audit_logger()
+        context = AuditContext(
+            user_id=None,  # CSP reports are anonymous
+            session_id=None,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            service_name="mesh",
+        )
+
+        await audit_logger.log(
+            event_type=EventType.SECURITY,
+            event_category=EventCategory.security,
+            event_action="csp_violation",
+            event_status=EventStatus.warning,
+            severity=Severity.WARNING,
+            context=context,
+            endpoint="/api/csp-report",
+            http_method="POST",
+            http_status_code=200,
+            request_data={
+                "violated_directive": csp_report.get("violated-directive"),
+                "blocked_uri": csp_report.get("blocked-uri"),
+                "document_uri": csp_report.get("document-uri"),
+                "original_policy": csp_report.get("original-policy"),
+                "source_file": csp_report.get("source-file"),
+                "line_number": csp_report.get("line-number"),
+                "column_number": csp_report.get("column-number"),
+            },
+            session=db,
+        )
+
+        # Check for repeated violations (potential attack)
+        blocked_uri = csp_report.get("blocked-uri", "")
+        violated_directive = csp_report.get("violated-directive", "")
+
+        # Alert on suspicious patterns
+        if blocked_uri and any(suspicious in blocked_uri.lower() for suspicious in ["eval", "inline", "data:", "javascript:"]):
+            logger.error(
+                f"SUSPICIOUS CSP VIOLATION: Potential XSS attempt blocked. "
+                f"Directive: {violated_directive}, URI: {blocked_uri}"
+            )
+
+        return JSONResponse(
+            status_code=204,  # No Content - standard for CSP reports
+            content=None
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing CSP report: {str(e)}")
+        # Return 204 even on error to avoid browser retry loops
+        return JSONResponse(status_code=204, content=None)
+
 
 # ============================================================================
 # RBAC Configuration - Service to Resource Type Mapping

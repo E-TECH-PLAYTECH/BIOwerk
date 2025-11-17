@@ -106,8 +106,9 @@ docker run -v $(pwd):/zap/wrk:rw \
 - Rate limiting (configurable per endpoint)
 - Input validation and sanitization
 - Request size limits
-- CORS configuration
+- CORS configuration (explicit origins in production)
 - API versioning
+- Comprehensive security headers (CSP, HSTS, X-Frame-Options, etc.)
 
 #### Infrastructure Security
 - Container image scanning (Trivy)
@@ -513,7 +514,430 @@ BIOwerk includes dedicated GDPR compliance features:
 
 See `services/gdpr/` for implementation details.
 
-### 6. Secure Development Lifecycle
+### 7. Security Headers
+
+BIOwerk implements comprehensive security headers on all HTTP responses to protect against common web vulnerabilities including XSS, clickjacking, MIME sniffing, and protocol downgrade attacks.
+
+#### Overview
+
+All HTTP responses from the mesh gateway and services include the following security headers:
+
+| Header | Purpose | Default Value |
+|--------|---------|---------------|
+| Content-Security-Policy | Prevents XSS, data injection, and unauthorized script execution | `default-src 'self'` |
+| Strict-Transport-Security (HSTS) | Enforces HTTPS connections | `max-age=31536000; includeSubDomains` |
+| X-Frame-Options | Prevents clickjacking attacks | `DENY` |
+| X-Content-Type-Options | Prevents MIME sniffing | `nosniff` |
+| X-XSS-Protection | Legacy XSS protection for older browsers | `1; mode=block` |
+| Referrer-Policy | Controls referrer information leakage | `strict-origin-when-cross-origin` |
+| Permissions-Policy | Restricts browser features (camera, microphone, etc.) | `geolocation=(), microphone=(), camera=()` |
+
+#### Content-Security-Policy (CSP)
+
+CSP is the most powerful security header, preventing a wide range of attacks including XSS, data injection, and unauthorized resource loading.
+
+**Default Policy:**
+```
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data: https:;
+  font-src 'self' data:;
+  connect-src 'self';
+  media-src 'self';
+  object-src 'none';
+  frame-src 'none';
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self';
+  upgrade-insecure-requests;
+  report-uri /api/csp-report
+```
+
+**Directive Explanations:**
+
+- `default-src 'self'`: Only allow resources from the same origin by default
+- `script-src 'self'`: Only execute scripts from the same origin (blocks inline scripts and eval)
+- `style-src 'self' 'unsafe-inline'`: Allow same-origin stylesheets and inline styles
+- `img-src 'self' data: https:`: Allow images from same origin, data URIs, and HTTPS sources
+- `object-src 'none'`: Disallow plugins (Flash, Java, etc.)
+- `frame-src 'none'`: Disallow embedding in iframes
+- `frame-ancestors 'none'`: Prevent this site from being embedded in iframes
+- `upgrade-insecure-requests`: Automatically upgrade HTTP requests to HTTPS
+
+**Environment-Specific Behavior:**
+
+- **Development**: CSP is in report-only mode by default (violations logged but not blocked)
+- **Production**: CSP is enforced (violations are blocked)
+
+#### HTTP Strict-Transport-Security (HSTS)
+
+HSTS forces browsers to only connect via HTTPS, preventing protocol downgrade attacks and cookie hijacking.
+
+**Configuration:**
+```
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+```
+
+- `max-age=31536000`: Enforce HTTPS for 1 year (365 days)
+- `includeSubDomains`: Apply to all subdomains
+- Only sent when TLS is enabled (`TLS_ENABLED=true`)
+
+**HSTS Preloading:**
+
+For maximum security, submit your domain to the HSTS preload list:
+```bash
+# Enable HSTS preloading
+export HSTS_PRELOAD=true
+```
+
+Then submit to: https://hstspreload.org/
+
+#### X-Frame-Options
+
+Prevents clickjacking by controlling whether the site can be embedded in iframes.
+
+**Options:**
+- `DENY` (default): Never allow embedding in iframes
+- `SAMEORIGIN`: Allow embedding only on same-origin pages
+- `ALLOW-FROM <uri>`: Allow embedding from specific URI (deprecated, use CSP frame-ancestors instead)
+
+**Configuration:**
+```bash
+# Default: DENY
+export X_FRAME_OPTIONS=DENY
+
+# Allow same-origin embedding
+export X_FRAME_OPTIONS=SAMEORIGIN
+```
+
+#### Permissions-Policy
+
+Controls which browser features and APIs can be used.
+
+**Default Policy:**
+```
+Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), speaker=()
+```
+
+This blocks access to sensitive browser features. Customize per your needs:
+
+```bash
+# Allow camera and microphone for same origin
+export PERMISSIONS_POLICY="camera=(self), microphone=(self), geolocation=()"
+```
+
+#### CORS Configuration
+
+Cross-Origin Resource Sharing (CORS) is configured securely based on environment:
+
+**Production:**
+```bash
+# Explicit allowed origins (required in production)
+export CORS_ALLOWED_ORIGINS="https://app.example.com,https://admin.example.com"
+```
+
+**Development:**
+```bash
+# Allow all origins (automatic in development)
+# CORS_ALLOWED_ORIGINS="*"  # implicit
+```
+
+**CORS Settings:**
+- **Methods**: `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`, `PATCH`
+- **Headers**: `Authorization`, `Content-Type`, `X-API-Key`, and other standard headers
+- **Credentials**: Enabled (allows cookies and authorization headers)
+- **Max Age**: 600 seconds (10 minutes for preflight cache)
+
+**Security Note:** Never use wildcard (`*`) origins in production when `allow_credentials=true`. This is a security risk and will be blocked by browsers.
+
+#### CSP Violation Reporting
+
+BIOwerk automatically logs all CSP violations to the audit system for security monitoring.
+
+**Violation Report Endpoint:**
+```
+POST /api/csp-report
+```
+
+**What Gets Logged:**
+- Violated directive (e.g., `script-src`, `img-src`)
+- Blocked URI (the resource that was blocked)
+- Document URI (the page where violation occurred)
+- Source file and line number (for debugging)
+- IP address and user agent
+
+**Suspicious Activity Detection:**
+
+CSP violations containing suspicious patterns trigger additional alerts:
+- `eval()` usage attempts
+- Inline script attempts
+- `data:` URI script attempts
+- `javascript:` protocol usage
+
+**Viewing CSP Reports:**
+
+```sql
+-- Query CSP violations from audit log
+SELECT
+  timestamp,
+  request_data->>'violated_directive' as directive,
+  request_data->>'blocked_uri' as blocked_uri,
+  request_data->>'document_uri' as page,
+  ip_address,
+  user_agent
+FROM audit_logs
+WHERE event_action = 'csp_violation'
+ORDER BY timestamp DESC
+LIMIT 100;
+```
+
+#### Customizing Security Headers
+
+All security headers are configurable via environment variables:
+
+**CSP Customization:**
+```bash
+# Enable/disable CSP
+export CSP_ENABLED=true
+
+# Report-only mode (violations logged but not blocked)
+export CSP_REPORT_ONLY=false  # false in production, true in dev
+
+# Customize specific directives
+export CSP_DEFAULT_SRC="'self'"
+export CSP_SCRIPT_SRC="'self' https://cdn.example.com"
+export CSP_STYLE_SRC="'self' 'unsafe-inline' https://fonts.googleapis.com"
+export CSP_IMG_SRC="'self' data: https:"
+export CSP_CONNECT_SRC="'self' https://api.example.com"
+export CSP_FONT_SRC="'self' data: https://fonts.gstatic.com"
+
+# Upgrade insecure requests (HTTP -> HTTPS)
+export CSP_UPGRADE_INSECURE_REQUESTS="upgrade-insecure-requests"  # or "" to disable
+
+# CSP reporting
+export CSP_REPORT_URI="/api/csp-report"
+export CSP_REPORT_ENABLED=true
+```
+
+**HSTS Customization:**
+```bash
+# Enable/disable HSTS
+export HSTS_ENABLED=true  # Recommended: true in production
+
+# Max age in seconds (default: 1 year)
+export HSTS_MAX_AGE=31536000
+
+# Include subdomains
+export HSTS_INCLUDE_SUBDOMAINS=true
+
+# Enable HSTS preload
+export HSTS_PRELOAD=false
+```
+
+**Other Headers:**
+```bash
+# X-Frame-Options
+export X_FRAME_OPTIONS=DENY
+
+# X-Content-Type-Options
+export X_CONTENT_TYPE_OPTIONS=nosniff
+
+# X-XSS-Protection
+export X_XSS_PROTECTION="1; mode=block"
+
+# Referrer-Policy
+export REFERRER_POLICY=strict-origin-when-cross-origin
+
+# Permissions-Policy
+export PERMISSIONS_POLICY="geolocation=(), microphone=(), camera=()"
+
+# Cross-Origin-Opener-Policy
+export CROSS_ORIGIN_OPENER_POLICY=same-origin
+
+# Cross-Origin-Resource-Policy
+export CROSS_ORIGIN_RESOURCE_POLICY=same-origin
+```
+
+#### Testing Security Headers
+
+**1. Manual Testing:**
+
+```bash
+# Check security headers with curl
+curl -I https://localhost:8080/health
+
+# Expected output includes:
+# Content-Security-Policy: default-src 'self'; ...
+# Strict-Transport-Security: max-age=31536000; includeSubDomains
+# X-Frame-Options: DENY
+# X-Content-Type-Options: nosniff
+# X-XSS-Protection: 1; mode=block
+# Referrer-Policy: strict-origin-when-cross-origin
+# Permissions-Policy: geolocation=(), microphone=(), camera=()
+```
+
+**2. Automated Testing:**
+
+```bash
+# Run security headers tests
+pytest tests/test_security_headers.py -v
+
+# Expected output:
+# test_security_headers_present ✓
+# test_csp_header_correct ✓
+# test_hsts_header_present ✓
+# test_x_frame_options_present ✓
+# test_cors_configuration ✓
+# test_csp_violation_reporting ✓
+```
+
+**3. Online Security Scanners:**
+
+- **Mozilla Observatory**: https://observatory.mozilla.org/
+  - Target score: A+ (90+)
+  - Checks all security headers and best practices
+
+- **Security Headers**: https://securityheaders.com/
+  - Target score: A+
+  - Fast header analysis
+
+- **SSL Labs**: https://www.ssllabs.com/ssltest/
+  - For TLS/HTTPS configuration
+  - Target score: A+
+
+**4. Browser DevTools:**
+
+```javascript
+// Check CSP in browser console
+// Open DevTools -> Console
+// CSP violations will appear as errors
+console.log(document.querySelector('meta[http-equiv="Content-Security-Policy"]'));
+
+// Check all security headers
+fetch('/health').then(r => {
+  console.log('Security Headers:', {
+    'CSP': r.headers.get('content-security-policy'),
+    'HSTS': r.headers.get('strict-transport-security'),
+    'X-Frame-Options': r.headers.get('x-frame-options'),
+    'X-Content-Type-Options': r.headers.get('x-content-type-options')
+  });
+});
+```
+
+#### Common CSP Issues and Solutions
+
+**Issue: Inline scripts blocked**
+```
+Refused to execute inline script because it violates CSP directive "script-src 'self'"
+```
+
+**Solution:**
+1. Move inline scripts to external .js files (recommended)
+2. Or add nonce/hash to CSP policy (advanced)
+3. Or temporarily allow unsafe-inline (not recommended)
+
+```bash
+# Option 1: External files (recommended)
+# Move <script>...</script> to external file
+
+# Option 2: Allow unsafe-inline (NOT recommended)
+export CSP_SCRIPT_SRC="'self' 'unsafe-inline'"
+```
+
+**Issue: Third-party resources blocked**
+```
+Refused to load the image 'https://cdn.example.com/logo.png' because it violates CSP directive "img-src 'self'"
+```
+
+**Solution:** Add the domain to the appropriate directive
+```bash
+export CSP_IMG_SRC="'self' https://cdn.example.com"
+export CSP_SCRIPT_SRC="'self' https://cdn.example.com"
+export CSP_STYLE_SRC="'self' https://fonts.googleapis.com"
+export CSP_FONT_SRC="'self' https://fonts.gstatic.com"
+```
+
+**Issue: AJAX requests blocked**
+```
+Refused to connect to 'https://api.example.com' because it violates CSP directive "connect-src 'self'"
+```
+
+**Solution:** Add API domain to connect-src
+```bash
+export CSP_CONNECT_SRC="'self' https://api.example.com wss://websocket.example.com"
+```
+
+#### Security Headers Best Practices
+
+**1. Start with Report-Only Mode:**
+```bash
+# In development/staging, use report-only to test CSP
+export CSP_REPORT_ONLY=true
+```
+
+Monitor CSP reports for 1-2 weeks, fix violations, then enforce:
+```bash
+# In production, enforce CSP
+export CSP_REPORT_ONLY=false
+```
+
+**2. Use Strict Policies:**
+- Prefer `'self'` over specific domains
+- Avoid `'unsafe-inline'` and `'unsafe-eval'` for scripts
+- Use `'none'` for unused directives
+
+**3. Test Thoroughly:**
+- Test on all supported browsers
+- Test with browser extensions disabled
+- Test authenticated and unauthenticated flows
+- Run automated security header tests
+
+**4. Monitor Violations:**
+```bash
+# Set up alerts for suspicious CSP violations
+# Check audit logs daily for patterns
+SELECT
+  date_trunc('day', timestamp) as day,
+  request_data->>'violated_directive' as directive,
+  count(*) as violations
+FROM audit_logs
+WHERE event_action = 'csp_violation'
+GROUP BY day, directive
+ORDER BY day DESC, violations DESC;
+```
+
+**5. Keep Headers Updated:**
+- Review CSP policy quarterly
+- Update when adding new third-party services
+- Follow browser security announcements
+- Test after header changes
+
+#### Production Checklist
+
+Before deploying to production, verify:
+
+- [ ] CSP is enforced (not report-only): `CSP_REPORT_ONLY=false`
+- [ ] HSTS is enabled: `HSTS_ENABLED=true`
+- [ ] TLS is enabled: `TLS_ENABLED=true`
+- [ ] CORS uses explicit origins: `CORS_ALLOWED_ORIGINS=https://app.example.com`
+- [ ] X-Frame-Options is set: `X_FRAME_OPTIONS=DENY`
+- [ ] CSP reporting is configured: `CSP_REPORT_URI=/api/csp-report`
+- [ ] All security headers pass Mozilla Observatory (A+)
+- [ ] Security header tests pass: `pytest tests/test_security_headers.py`
+- [ ] No CSP violations in normal application usage
+- [ ] Audit logs are monitored for CSP violations
+
+#### References
+
+- [OWASP Secure Headers Project](https://owasp.org/www-project-secure-headers/)
+- [Content Security Policy Reference](https://content-security-policy.com/)
+- [MDN Security Headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#security)
+- [Mozilla Web Security Guidelines](https://infosec.mozilla.org/guidelines/web_security)
+- [HSTS Preload Submission](https://hstspreload.org/)
+
+### 8. Secure Development Lifecycle
 
 #### Pre-Commit
 - Git hooks for secret detection
@@ -534,7 +958,7 @@ See `services/gdpr/` for implementation details.
 - Blue-green deployments
 - Automated rollback on security alerts
 
-### 7. Security Monitoring
+### 9. Security Monitoring
 
 #### Logging & Auditing
 - All authentication attempts logged
@@ -554,7 +978,7 @@ See `services/gdpr/` for implementation details.
 - Automated alerting on anomalies
 - SLA monitoring
 
-### 8. Incident Response
+### 10. Incident Response
 
 #### Security Incident Procedure
 
@@ -572,7 +996,7 @@ For security issues, contact:
 - PGP Key: [Link to public key]
 - Bug Bounty: [Link to program]
 
-### 9. Security Best Practices
+### 11. Security Best Practices
 
 #### For Developers
 
@@ -593,7 +1017,7 @@ For security issues, contact:
 5. **Test disaster recovery**: Quarterly DR drills
 6. **Maintain security documentation**: Keep current
 
-### 10. Compliance & Certifications
+### 12. Compliance & Certifications
 
 BIOwerk is designed to support:
 
@@ -602,7 +1026,7 @@ BIOwerk is designed to support:
 - **SOC 2**: Service Organization Control 2
 - **ISO 27001**: Information Security Management
 
-### 11. Security Testing Schedule
+### 13. Security Testing Schedule
 
 | Test Type | Frequency | Duration | Automation |
 |-----------|-----------|----------|------------|
@@ -616,7 +1040,7 @@ BIOwerk is designed to support:
 | Penetration Test | Quarterly | N/A | External vendor |
 | Security Audit | Annually | N/A | External vendor |
 
-### 12. Reporting Security Vulnerabilities
+### 14. Reporting Security Vulnerabilities
 
 If you discover a security vulnerability:
 
@@ -629,7 +1053,7 @@ If you discover a security vulnerability:
 3. Allow up to 48 hours for initial response
 4. Coordinate disclosure timeline
 
-### 13. Security Updates
+### 15. Security Updates
 
 Subscribe to security advisories:
 - GitHub Security Advisories
@@ -726,9 +1150,10 @@ EOF
 ---
 
 **Last Updated**: 2025-11-17
-**Document Version**: 2.0
+**Document Version**: 3.0
 **Security Team**: security@biowerk.example.com
 
 **Version History:**
+- v3.0 (2025-11-17): Added comprehensive security headers documentation and implementation
 - v2.0 (2025-11-17): Added comprehensive secrets management documentation
 - v1.0 (2025-11-16): Initial security documentation
