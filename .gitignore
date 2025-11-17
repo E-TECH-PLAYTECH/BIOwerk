@@ -58,3 +58,4 @@ services/*/models/
 *.bin
 *.safetensors
 *.ggml
+distribution/output/
