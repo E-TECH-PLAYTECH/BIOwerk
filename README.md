@@ -34,6 +34,76 @@ curl -X POST http://localhost:8080/v1/osteon/draft -H 'Content-Type: application
 
 Need ongoing service insight? See [Operations](#operations) for observability and continuity guidance.
 
+## Installation Options
+
+BIOwerk offers multiple installation methods to suit different use cases:
+
+### 🚀 Portable Installation (Recommended for Quick Setup)
+
+**No Docker required!** Perfect for development, testing, and lightweight deployments.
+
+```bash
+# Download and extract
+tar -xzf biowerk-portable-1.0.0.tar.gz
+cd biowerk-portable-1.0.0
+
+# Install (creates ~/.biowerk by default)
+./install.sh
+
+# Start services
+cd ~/.biowerk
+./biowerk-start.sh
+```
+
+**Requirements:** Python 3.10+, 4GB RAM
+
+**What you get:**
+- ✅ All microservices running natively
+- ✅ SQLite database (or connect to external PostgreSQL/MongoDB)
+- ✅ Quick startup (~30 seconds)
+- ✅ Low resource usage (~2GB disk, ~2GB RAM)
+- ✅ Easy configuration via `.env` file
+
+[More details in distribution/portable/README.md](distribution/portable/README.md)
+
+### 🐳 Docker Installation (Recommended for Production)
+
+**Full-featured deployment** with complete infrastructure stack.
+
+```bash
+# Clone repository
+git clone https://github.com/E-TECH-PLAYTECH/BIOwerk.git
+cd BIOwerk
+
+# Start everything
+docker compose up --build
+```
+
+**What you get:**
+- ✅ Complete infrastructure (PostgreSQL, MongoDB, Redis)
+- ✅ Monitoring stack (Prometheus, Grafana)
+- ✅ Service isolation and orchestration
+- ✅ Production-ready configuration
+- ✅ Easy scaling with Kubernetes
+
+### 📦 Platform-Specific Installers
+
+**Desktop applications** with GUI management.
+
+- **macOS**: Download `.dmg`, drag to Applications
+- **Linux**: Download `.deb`, `.rpm`, `.AppImage`, or use installer script
+- **Windows**: Download `.exe` installer or run PowerShell script
+
+[Build instructions in distribution/README.md](distribution/README.md)
+
+### 🔄 Choosing Your Installation Method
+
+| Method | Best For | Setup Time | Resource Usage |
+|--------|----------|------------|----------------|
+| **Portable** | Development, testing, evaluation | ~5 min | Low (2GB) |
+| **Docker** | Production, teams, full features | ~10 min | Medium (5GB) |
+| **Desktop App** | End users, GUI preference | ~3 min | Low (3GB) |
+
 ## Security Features
 
 BIOwerk implements enterprise-grade security features for production deployments:

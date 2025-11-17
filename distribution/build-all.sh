@@ -36,7 +36,7 @@ info() {
 clean_build() {
     log "Cleaning previous builds..."
     rm -rf "$DIST_OUTPUT"
-    mkdir -p "$DIST_OUTPUT"/{macos,linux,windows,electron}
+    mkdir -p "$DIST_OUTPUT"/{macos,linux,windows,electron,portable}
 }
 
 # Build Electron app for all platforms
@@ -134,6 +134,21 @@ package_windows() {
     cd "$SCRIPT_DIR"
 }
 
+# Build portable archives
+build_portable() {
+    log "Building portable archives..."
+
+    cd "$SCRIPT_DIR/portable"
+
+    # Export VERSION for portable build script
+    export VERSION
+
+    bash build-portable.sh
+
+    log "Portable archives created"
+    cd "$SCRIPT_DIR"
+}
+
 # Create release notes
 create_release_notes() {
     log "Creating release notes..."
@@ -142,6 +157,19 @@ create_release_notes() {
 # BIOwerk v${VERSION} - Release Notes
 
 ## Installation
+
+### Portable Installation (Recommended for Quick Setup)
+
+Works on all platforms without Docker:
+
+1. Download \`biowerk-portable-${VERSION}.tar.gz\` (Linux/macOS) or \`biowerk-portable-${VERSION}.zip\` (Windows)
+2. Extract the archive
+3. Run installation script:
+   - **Linux/macOS**: \`./install.sh\`
+   - **Windows**: \`.\install.ps1\`
+4. Start BIOwerk:
+   - **Linux/macOS**: \`cd ~/.biowerk && ./biowerk-start.sh\`
+   - **Windows**: \`cd \$env:USERPROFILE\.biowerk && .\biowerk-start.ps1\`
 
 ### macOS
 1. Download \`biowerk-${VERSION}.dmg\`
@@ -253,6 +281,9 @@ main() {
     package_linux
     package_windows
 
+    # Build portable archives
+    build_portable
+
     # Create release artifacts
     create_release_notes
     create_checksums
@@ -285,6 +316,10 @@ while [[ $# -gt 0 ]]; do
             ELECTRON_ONLY=true
             shift
             ;;
+        --portable-only)
+            PORTABLE_ONLY=true
+            shift
+            ;;
         --clean)
             clean_build
             exit 0
@@ -295,6 +330,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --version VERSION    Set build version (default: 1.0.0)"
             echo "  --electron-only      Build only Electron apps"
+            echo "  --portable-only      Build only portable archives"
             echo "  --clean              Clean build directories and exit"
             echo "  --help               Show this help message"
             exit 0
@@ -309,6 +345,9 @@ done
 if [ "$ELECTRON_ONLY" = true ]; then
     clean_build
     build_electron
+elif [ "$PORTABLE_ONLY" = true ]; then
+    clean_build
+    build_portable
 else
     main
 fi
