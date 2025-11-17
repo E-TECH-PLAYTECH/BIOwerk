@@ -1017,3 +1017,215 @@ class CostAlert(Base):
             f"<CostAlert(id={self.id}, type={self.alert_type}, severity={self.severity}, "
             f"status={self.status}, usage={self.usage_percentage:.1f}%)>"
         )
+
+
+# ============================================================================
+# Role-Based Access Control (RBAC) Models
+# ============================================================================
+
+
+class Role(Base):
+    """
+    RBAC Role model.
+
+    Defines roles that can be assigned to users for access control.
+    Standard roles: admin, user, viewer, service_account
+    """
+    __tablename__ = "roles"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(50), unique=True, nullable=False, index=True)  # admin, user, viewer, service_account
+    description = Column(Text, nullable=True)
+
+    # Role metadata
+    is_system_role = Column(Boolean, default=False, nullable=False)  # System roles cannot be deleted
+    is_default = Column(Boolean, default=False, nullable=False)  # Auto-assigned to new users
+    priority = Column(Integer, default=0, nullable=False)  # Higher priority roles take precedence
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+    role_permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Role(id={self.id}, name={self.name}, priority={self.priority})>"
+
+
+class Permission(Base):
+    """
+    RBAC Permission model.
+
+    Defines granular permissions that can be assigned to roles.
+    Standard permissions: read, write, delete, admin
+    Resource types: project, artifact, execution, user, api_key, global
+    """
+    __tablename__ = "permissions"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Permission details
+    action = Column(String(50), nullable=False, index=True)  # read, write, delete, admin, execute
+    resource_type = Column(String(50), nullable=False, index=True)  # project, artifact, execution, user, api_key, global
+    description = Column(Text, nullable=True)
+
+    # Permission scope
+    scope = Column(String(50), default="resource", nullable=False)  # resource, project, global
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    role_permissions = relationship("RolePermission", back_populates="permission", cascade="all, delete-orphan")
+
+    # Indexes
+    __table_args__ = (
+        # Ensure unique action:resource_type combinations
+        Index("idx_permission_unique", "action", "resource_type", unique=True),
+        Index("idx_permission_scope", "scope", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<Permission(id={self.id}, action={self.action}, resource={self.resource_type}, scope={self.scope})>"
+
+
+class RolePermission(Base):
+    """
+    RBAC Role-Permission association model.
+
+    Associates permissions with roles. A role can have multiple permissions.
+    """
+    __tablename__ = "role_permissions"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    role_id = Column(String(36), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True)
+    permission_id = Column(String(36), ForeignKey("permissions.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Optional: Resource-specific constraints
+    resource_id = Column(String(36), nullable=True, index=True)  # Specific resource ID (for fine-grained control)
+
+    # Grant conditions (JSON field for advanced rules)
+    conditions = Column(JSON, nullable=True)  # e.g., {"time_range": "business_hours", "ip_whitelist": [...]}
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    granted_by = Column(String(100), nullable=True)  # Admin who granted this permission
+
+    # Expiration (optional)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    role = relationship("Role", back_populates="role_permissions")
+    permission = relationship("Permission", back_populates="role_permissions")
+
+    # Indexes
+    __table_args__ = (
+        # Ensure unique role:permission combinations (unless resource-specific)
+        Index("idx_role_permission_unique", "role_id", "permission_id", "resource_id", unique=True),
+        Index("idx_role_permission_active", "role_id", "is_active"),
+        Index("idx_role_permission_expiry", "expires_at", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<RolePermission(id={self.id}, role_id={self.role_id}, permission_id={self.permission_id})>"
+
+
+class UserRole(Base):
+    """
+    RBAC User-Role association model.
+
+    Associates users with roles. A user can have multiple roles.
+    """
+    __tablename__ = "user_roles"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id = Column(String(36), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Scope (optional: role can be scoped to specific projects/resources)
+    scope_type = Column(String(50), nullable=True, index=True)  # project, artifact, global
+    scope_id = Column(String(36), nullable=True, index=True)  # Specific project/artifact ID
+
+    # Assignment metadata
+    assigned_by = Column(String(100), nullable=True)  # Admin who assigned this role
+    assignment_reason = Column(Text, nullable=True)
+
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    # Expiration (optional: temporary role assignments)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    role = relationship("Role", back_populates="user_roles")
+
+    # Indexes
+    __table_args__ = (
+        # Ensure unique user:role:scope combinations
+        Index("idx_user_role_unique", "user_id", "role_id", "scope_type", "scope_id", unique=True),
+        Index("idx_user_role_active", "user_id", "is_active"),
+        Index("idx_user_role_scope", "scope_type", "scope_id", "is_active"),
+        Index("idx_user_role_expiry", "expires_at", "is_active"),
+    )
+
+    def __repr__(self):
+        return f"<UserRole(id={self.id}, user_id={self.user_id}, role_id={self.role_id}, scope={self.scope_type}:{self.scope_id})>"
+
+
+class ResourceOwnership(Base):
+    """
+    Resource ownership tracking for fine-grained access control.
+
+    Tracks who owns/created each resource to enable owner-based permissions.
+    """
+    __tablename__ = "resource_ownership"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+
+    # Resource details
+    resource_type = Column(String(50), nullable=False, index=True)  # project, artifact, execution
+    resource_id = Column(String(36), nullable=False, index=True)
+
+    # Owner
+    owner_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Ownership metadata
+    ownership_type = Column(String(50), default="created", nullable=False)  # created, transferred, inherited
+    transferred_from = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    transfer_reason = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    owner = relationship("User", foreign_keys=[owner_id])
+    transferred_from_user = relationship("User", foreign_keys=[transferred_from])
+
+    # Indexes
+    __table_args__ = (
+        # Ensure unique resource tracking
+        Index("idx_resource_unique", "resource_type", "resource_id", unique=True),
+        Index("idx_resource_owner", "owner_id", "resource_type"),
+    )
+
+    def __repr__(self):
+        return f"<ResourceOwnership(resource={self.resource_type}:{self.resource_id}, owner_id={self.owner_id})>"

@@ -1,8 +1,8 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 import os, httpx, time
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import Dict, Optional
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
@@ -16,6 +16,14 @@ from matrix.resilience import (
     BulkheadFullError,
     HealthAwareRouter
 )
+from matrix.auth_dependencies import (
+    get_current_user,
+    get_current_user_or_api_key,
+    has_permission,
+    get_postgres_session
+)
+from matrix.db_models import User
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Agent URLs configuration
 AGENT_URLS = {
@@ -114,22 +122,124 @@ logger = setup_logging("mesh")
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="mesh", version="1.0.0")
 
-@app.post("/{agent}/{endpoint}")
-async def route(agent: str, endpoint: str, request: Request):
+# ============================================================================
+# RBAC Configuration - Service to Resource Type Mapping
+# ============================================================================
+
+# Define which service operations require which permissions
+SERVICE_PERMISSION_MAP = {
+    "osteon": {
+        "outline": ("write", "artifact"),
+        "draft": ("write", "artifact"),
+        "edit": ("write", "artifact"),
+        "summarize": ("read", "artifact"),
+        "export": ("read", "artifact"),
+    },
+    "myocyte": {
+        "ingest_table": ("write", "artifact"),
+        "formula_eval": ("write", "artifact"),
+        "model_forecast": ("write", "artifact"),
+        "export": ("read", "artifact"),
+    },
+    "synapse": {
+        "storyboard": ("write", "artifact"),
+        "slide_make": ("write", "artifact"),
+        "visualize": ("write", "artifact"),
+        "export": ("read", "artifact"),
+    },
+    "nucleus": {
+        "plan": ("admin", "project"),  # Project planning requires admin
+        "route": ("read", "execution"),
+        "review": ("read", "execution"),
+        "finalize": ("write", "execution"),
+    },
+    "circadian": {
+        "plan_timeline": ("write", "project"),
+        "assign": ("admin", "project"),  # Task assignment requires admin
+        "track": ("read", "project"),
+        "remind": ("read", "project"),
+    },
+    "chaperone": {
+        "validate": ("read", "execution"),
+        "monitor": ("read", "execution"),
+    },
+}
+
+
+async def check_rbac_authorization(
+    agent: str,
+    endpoint: str,
+    user: Optional[User],
+    db: AsyncSession
+) -> bool:
     """
-    Route requests to agents with enterprise-grade resilience.
+    Check if user is authorized to access the agent endpoint.
+
+    Args:
+        agent: Service/agent name
+        endpoint: Endpoint name
+        user: User object (can be None if auth not required)
+        db: Database session
+
+    Returns:
+        True if authorized, raises HTTPException otherwise
+    """
+    # If auth is not required and no user, allow access
+    if not settings.require_auth and not user:
+        return True
+
+    # If auth is required but no user, deny
+    if settings.require_auth and not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required"
+        )
+
+    # If no user at this point, allow (auth not required)
+    if not user:
+        return True
+
+    # Check if service/endpoint has RBAC requirements
+    if agent in SERVICE_PERMISSION_MAP:
+        endpoint_perms = SERVICE_PERMISSION_MAP[agent].get(endpoint)
+        if endpoint_perms:
+            action, resource_type = endpoint_perms
+
+            # Check permission
+            if not await has_permission(user, action, resource_type, db):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Permission denied: {action} on {resource_type} required for {agent}/{endpoint}"
+                )
+
+    return True
+
+@app.post("/{agent}/{endpoint}")
+async def route(
+    agent: str,
+    endpoint: str,
+    request: Request,
+    user: Optional[User] = Depends(get_current_user_or_api_key),
+    db: AsyncSession = Depends(get_postgres_session)
+):
+    """
+    Route requests to agents with enterprise-grade resilience and RBAC.
 
     Features:
     - Circuit breaker: Fails fast when agent is down
     - Retry with exponential backoff: Handles transient failures
     - Bulkhead: Prevents resource exhaustion
     - Health-aware routing: Checks agent health before routing
+    - RBAC: Role-based access control for all endpoints
     """
     start_time = time.time()
     data = await request.json()
     msg = Msg(**data)
 
     log_request(logger, msg.id, agent, endpoint)
+
+    # RBAC Authorization Check
+    await check_rbac_authorization(agent, endpoint, user, db)
 
     # Validate agent exists
     if agent not in AGENT_URLS:
