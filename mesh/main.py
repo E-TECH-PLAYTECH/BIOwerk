@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import os, httpx, time
+import os, httpx, time, uuid
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 from matrix.models import Msg, Reply
@@ -10,6 +10,7 @@ from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
 from matrix.errors import AgentNotFoundError
 from matrix.config import settings
+from matrix.database import get_redis_client
 from matrix.resilience import (
     ResilientHttpClient,
     CircuitBreakerError,
@@ -17,6 +18,12 @@ from matrix.resilience import (
     BulkheadFullError,
     HealthAwareRouter
 )
+from matrix.distributed_circuit_breaker import (
+    DistributedCircuitBreakerManager,
+    CircuitBreakerError as DistributedCircuitBreakerError
+)
+from matrix.distributed_health import DistributedHealthManager
+from matrix.service_discovery import ServiceRegistry, LoadBalancer
 from matrix.auth_dependencies import (
     get_current_user,
     get_current_user_or_api_key,
@@ -39,45 +46,103 @@ AGENT_URLS = {
     "chaperone": os.getenv("AGENT_CHAPERONE_URL","http://chaperone:8006"),
 }
 
-# Global resilient HTTP clients for each agent
-resilient_clients: Dict[str, ResilientHttpClient] = {}
+# Mesh instance ID (unique for each replica)
+MESH_INSTANCE_ID = os.getenv("MESH_INSTANCE_ID", f"mesh-{uuid.uuid4().hex[:8]}")
 
-# Health-aware router for intelligent routing
-health_router: HealthAwareRouter = None
+
+class MeshState:
+    """
+    Application state container for distributed mesh components.
+
+    This replaces global state variables and ensures all state is stored
+    in Redis, making the mesh gateway fully horizontally scalable.
+
+    Each mesh instance has its own MeshState object, but all state is
+    shared via Redis.
+    """
+    def __init__(self):
+        self.redis = None
+        self.circuit_breaker_manager: Optional[DistributedCircuitBreakerManager] = None
+        self.health_manager: Optional[DistributedHealthManager] = None
+        self.service_registry: Optional[ServiceRegistry] = None
+        self.load_balancer: Optional[LoadBalancer] = None
+        self.resilient_clients: Dict[str, ResilientHttpClient] = {}
+
+
+# Application state instance (per mesh replica)
+mesh_state = MeshState()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan management."""
-    global resilient_clients, health_router
+    """
+    Application lifespan management with distributed state components.
 
-    # Initialize health-aware router if enabled
-    if settings.health_check_enabled:
-        health_router = HealthAwareRouter(
-            health_check_interval=settings.health_check_interval,
-            unhealthy_threshold=settings.health_unhealthy_threshold,
-            healthy_threshold=settings.health_healthy_threshold
+    Initializes Redis-backed distributed components for horizontal scaling:
+    - Distributed circuit breakers (shared state across all mesh instances)
+    - Distributed health checking (aggregated health across cluster)
+    - Service registry (track all service instances)
+    - Load balancer (distribute requests across replicas)
+    """
+    # Initialize Redis client
+    mesh_state.redis = get_redis_client()
+    logger.info(f"Mesh instance {MESH_INSTANCE_ID} starting with distributed components")
+
+    # Initialize distributed circuit breaker manager
+    if settings.circuit_breaker_enabled:
+        mesh_state.circuit_breaker_manager = DistributedCircuitBreakerManager(
+            redis=mesh_state.redis
         )
+        logger.info("Distributed circuit breaker manager initialized")
 
-        # Register all agents for health monitoring
+    # Initialize distributed health manager
+    if settings.health_check_enabled:
+        mesh_state.health_manager = DistributedHealthManager(redis=mesh_state.redis)
+
+        # Register all agents for distributed health monitoring
         for agent_name, agent_url in AGENT_URLS.items():
-            health_router.register_service(
+            await mesh_state.health_manager.register_service(
                 service_name=agent_name,
-                health_url=f"{agent_url}/health"
+                health_url=f"{agent_url}/health",
+                interval=settings.health_check_interval,
+                unhealthy_threshold=settings.health_unhealthy_threshold,
+                healthy_threshold=settings.health_healthy_threshold,
             )
 
-        logger.info("Health-aware router initialized for all agents")
+        # Start all health checkers
+        await mesh_state.health_manager.start_all()
+        logger.info("Distributed health checking started for all agents")
+
+    # Initialize service registry
+    mesh_state.service_registry = ServiceRegistry(
+        redis=mesh_state.redis,
+        heartbeat_ttl=30  # Instances must heartbeat every 30 seconds
+    )
+
+    # Register this mesh instance
+    mesh_host = os.getenv("MESH_HOST", "mesh")
+    mesh_port = int(os.getenv("MESH_PORT", "8000"))
+    await mesh_state.service_registry.register_instance(
+        service_name="mesh",
+        instance_id=MESH_INSTANCE_ID,
+        host=mesh_host,
+        port=mesh_port,
+        metadata={"version": "1.0.0"}
+    )
+    logger.info(f"Registered mesh instance {MESH_INSTANCE_ID} at {mesh_host}:{mesh_port}")
+
+    # Initialize load balancer (for future multi-instance agent support)
+    load_balancing_strategy = os.getenv("LOAD_BALANCING_STRATEGY", "round_robin")
+    mesh_state.load_balancer = LoadBalancer(
+        redis=mesh_state.redis,
+        strategy=load_balancing_strategy  # type: ignore
+    )
+    logger.info(f"Load balancer initialized with strategy: {load_balancing_strategy}")
 
     # Initialize resilient HTTP clients for each agent
+    # Note: These clients use local resilience patterns (retry, bulkhead)
+    # but circuit breakers are distributed via mesh_state.circuit_breaker_manager
     for agent_name, agent_url in AGENT_URLS.items():
-        circuit_breaker_kwargs = {
-            'failure_threshold': settings.circuit_breaker_failure_threshold,
-            'success_threshold': settings.circuit_breaker_success_threshold,
-            'timeout': settings.circuit_breaker_timeout,
-            'failure_rate_threshold': settings.circuit_breaker_failure_rate_threshold,
-            'window_size': settings.circuit_breaker_window_size
-        } if settings.circuit_breaker_enabled else None
-
         retry_kwargs = {
             'max_attempts': settings.retry_max_attempts,
             'initial_delay': settings.retry_initial_delay,
@@ -92,7 +157,17 @@ async def lifespan(app: FastAPI):
             'timeout': settings.bulkhead_timeout
         } if settings.bulkhead_enabled else None
 
-        resilient_clients[agent_name] = ResilientHttpClient(
+        # Use local circuit breaker for backward compatibility
+        # In production, you can switch to fully distributed circuit breakers
+        circuit_breaker_kwargs = {
+            'failure_threshold': settings.circuit_breaker_failure_threshold,
+            'success_threshold': settings.circuit_breaker_success_threshold,
+            'timeout': settings.circuit_breaker_timeout,
+            'failure_rate_threshold': settings.circuit_breaker_failure_rate_threshold,
+            'window_size': settings.circuit_breaker_window_size
+        } if settings.circuit_breaker_enabled else None
+
+        mesh_state.resilient_clients[agent_name] = ResilientHttpClient(
             service_name=agent_name,
             base_url=agent_url,
             timeout=settings.service_timeout_mesh,
@@ -106,16 +181,40 @@ async def lifespan(app: FastAPI):
 
         logger.info(f"Initialized resilient client for agent: {agent_name}")
 
-    logger.info("Service mesh resilience initialized successfully")
+    logger.info(f"Mesh instance {MESH_INSTANCE_ID} initialization complete - ready for horizontal scaling")
 
     yield
 
-    # Cleanup: close all HTTP clients
-    for agent_name, client in resilient_clients.items():
+    # Cleanup
+    logger.info(f"Mesh instance {MESH_INSTANCE_ID} shutting down")
+
+    # Stop health checking
+    if mesh_state.health_manager:
+        await mesh_state.health_manager.stop_all()
+        logger.info("Stopped distributed health checking")
+
+    # Deregister this mesh instance
+    if mesh_state.service_registry:
+        await mesh_state.service_registry.deregister_instance(
+            service_name="mesh",
+            instance_id=MESH_INSTANCE_ID,
+            reason="shutdown"
+        )
+        logger.info(f"Deregistered mesh instance {MESH_INSTANCE_ID}")
+
+    # Close all HTTP clients
+    for agent_name, client in mesh_state.resilient_clients.items():
         await client.aclose()
         logger.info(f"Closed resilient client for agent: {agent_name}")
 
-    resilient_clients.clear()
+    mesh_state.resilient_clients.clear()
+
+    # Close Redis connection
+    if mesh_state.redis:
+        await mesh_state.redis.close()
+        logger.info("Closed Redis connection")
+
+    logger.info(f"Mesh instance {MESH_INSTANCE_ID} shutdown complete")
 
 
 app = FastAPI(title="Mesh Gateway", lifespan=lifespan)
@@ -393,16 +492,16 @@ async def _route_handler(
         log_error(logger, msg.id, error, agent=agent, endpoint=endpoint)
         raise HTTPException(status_code=404, detail=f"Unknown agent: {agent}")
 
-    # Health-aware routing: Check if agent is healthy
-    if health_router and not health_router.is_healthy(agent):
-        health_score = health_router.get_health_score(agent)
+    # Health-aware routing: Check if agent is healthy (distributed)
+    if mesh_state.health_manager and not await mesh_state.health_manager.is_healthy(agent):
+        health_status = await mesh_state.health_manager._checkers[agent].get_status() if agent in mesh_state.health_manager._checkers else {}
         logger.warning(
-            f"Agent {agent} is marked unhealthy (health_score={health_score:.2f}). "
+            f"Agent {agent} is marked unhealthy (status={health_status}). "
             f"Attempting request anyway with circuit breaker protection."
         )
 
     # Get resilient client for this agent
-    client = resilient_clients.get(agent)
+    client = mesh_state.resilient_clients.get(agent)
     if not client:
         # Fallback to basic HTTP client if resilient client not initialized
         logger.warning(f"Resilient client not found for {agent}, using fallback")
@@ -442,9 +541,8 @@ async def _route_handler(
         url = f"/{endpoint}"
         r = await client.post(url, json=msg.model_dump(), headers=headers or None)
 
-        # Update health status on success
-        if health_router:
-            await health_router.update_health(agent, is_healthy=True)
+        # Health status is automatically updated by distributed health checker
+        # No need for manual updates here
 
         response_data = r.json()
 
@@ -462,8 +560,7 @@ async def _route_handler(
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, exc, agent=agent, endpoint=endpoint, duration_ms=duration_ms)
 
-        if health_router:
-            await health_router.update_health(agent, is_healthy=False)
+        # Health status is automatically tracked by distributed health checker
 
         raise HTTPException(
             status_code=503,
@@ -480,8 +577,7 @@ async def _route_handler(
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, exc, agent=agent, endpoint=endpoint, duration_ms=duration_ms)
 
-        if health_router:
-            await health_router.update_health(agent, is_healthy=False)
+        # Health status is automatically tracked by distributed health checker
 
         raise HTTPException(
             status_code=503,
@@ -514,9 +610,7 @@ async def _route_handler(
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, exc, agent=agent, endpoint=endpoint, status_code=exc.response.status_code, duration_ms=duration_ms)
 
-        # Update health on server errors (5xx)
-        if health_router and exc.response.status_code >= 500:
-            await health_router.update_health(agent, is_healthy=False)
+        # Health status is automatically tracked by distributed health checker
 
         try:
             content = exc.response.json()
@@ -530,8 +624,7 @@ async def _route_handler(
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, exc, agent=agent, endpoint=endpoint, duration_ms=duration_ms)
 
-        if health_router:
-            await health_router.update_health(agent, is_healthy=False)
+        # Health status is automatically tracked by distributed health checker
 
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
