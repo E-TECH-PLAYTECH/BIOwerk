@@ -16,6 +16,9 @@ from llama_cpp import Llama
 # Import BIOwerk matrix modules for observability and health
 from matrix.observability import setup_instrumentation
 from matrix.health import setup_health_endpoints
+from matrix.validation import setup_validation_middleware
+from matrix.errors import ValidationError
+from pydantic import ValidationError as PydanticValidationError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,6 +27,7 @@ app = FastAPI(title="Larry - Conversational Stooge")
 
 # Setup comprehensive observability and health endpoints
 setup_instrumentation(app, service_name="larry", service_version="1.0.0")
+setup_validation_middleware(app)
 setup_health_endpoints(app, service_name="larry", version="1.0.0")
 
 # Load PHI2 model

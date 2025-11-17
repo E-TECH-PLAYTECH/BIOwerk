@@ -23,12 +23,14 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import create_error_response
+from matrix.errors import create_error_response, ValidationError
 from matrix.database import get_db, get_session_manager
 from matrix.encryption import EncryptionService
 from matrix.audit import AuditService
 from matrix.gdpr import GDPRService, GDPRError, DataRequestError, ConsentError
 from matrix.auth import get_current_user
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 
 app = FastAPI(
     title="GDPR Compliance Service",
@@ -36,6 +38,7 @@ app = FastAPI(
     version="1.0.0"
 )
 setup_instrumentation(app, service_name="gdpr", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("gdpr")
 session_mgr = get_session_manager("long")  # 8-hour sessions for long-running operations
 

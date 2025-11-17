@@ -3,14 +3,23 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import InvalidInputError, create_error_response
+from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.api_models import (
+    PlanRequest,
+    RouteRequest,
+    ReviewRequest,
+    FinalizeRequest
+)
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 import httpx
 
 app = FastAPI(title="Nucleus")
 setup_instrumentation(app, service_name="nucleus", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("nucleus")
 
 # Setup comprehensive health and readiness endpoints
@@ -34,13 +43,18 @@ async def _plan_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "nucleus", "plan")
 
     try:
-        inp = msg.input or {}
-        goal = inp.get("goal", "")
-        requirements = inp.get("requirements", [])
-        available_agents = inp.get("available_agents", list(AGENTS.keys()))
+        # Validate input using Pydantic model
+        try:
+            req = PlanRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for plan request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not goal:
-            raise InvalidInputError("goal is required")
+        goal = req.goal
+        requirements = req.requirements
+        available_agents = req.available_agents or list(AGENTS.keys())
 
         # Generate plan using LLM
         system_prompt = """You are a workflow orchestration expert. Create an execution plan to achieve the given goal.
@@ -102,12 +116,17 @@ async def _route_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "nucleus", "route")
 
     try:
-        inp = msg.input or {}
-        request_description = inp.get("request", "")
-        context = inp.get("context", "")
+        # Validate input using Pydantic model
+        try:
+            req = RouteRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for route request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not request_description:
-            raise InvalidInputError("request is required")
+        request_description = req.request
+        context = req.context
 
         # Route using LLM
         system_prompt = """You are a request routing expert. Analyze the request and determine the best agent and endpoint.
@@ -160,12 +179,17 @@ async def _review_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "nucleus", "review")
 
     try:
-        inp = msg.input or {}
-        content = inp.get("content", {})
-        criteria = inp.get("criteria", ["quality", "completeness", "accuracy"])
+        # Validate input using Pydantic model
+        try:
+            req = ReviewRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for review request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not content:
-            raise InvalidInputError("content is required for review")
+        content = req.content
+        criteria = req.criteria
 
         # Review using LLM
         system_prompt = """You are a quality assurance expert. Review the content against the given criteria.
@@ -216,12 +240,17 @@ async def _finalize_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "nucleus", "finalize")
 
     try:
-        inp = msg.input or {}
-        workflow_results = inp.get("workflow_results", [])
-        goal = inp.get("goal", "")
+        # Validate input using Pydantic model
+        try:
+            req = FinalizeRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for finalize request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not workflow_results:
-            raise InvalidInputError("workflow_results is required")
+        workflow_results = req.workflow_results
+        goal = req.goal
 
         # Finalize using LLM
         system_prompt = """You are a workflow finalization expert. Analyze workflow results and create a summary.

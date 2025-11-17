@@ -3,13 +3,22 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import InvalidInputError, create_error_response
+from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.api_models import (
+    StoryboardRequest,
+    SlideMakeRequest,
+    VisualizeRequest,
+    ExportRequest
+)
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
 app = FastAPI(title="Synapse")
 setup_instrumentation(app, service_name="synapse", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("synapse")
 
 # Setup comprehensive health and readiness endpoints
@@ -26,14 +35,20 @@ async def _storyboard_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "synapse", "storyboard")
 
     try:
-        inp = msg.input or {}
-        topic = inp.get("topic", "")
-        goal = inp.get("goal", "")
-        audience = inp.get("audience", "general")
-        num_slides = inp.get("num_slides", 10)
+        # Validate input using Pydantic model
+        try:
+            req = StoryboardRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for storyboard request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not topic and not goal:
-            raise InvalidInputError("Topic or goal is required")
+        topic = req.topic
+        goal = req.goal
+        audience = req.audience
+        num_slides = req.num_slides
 
         # Generate storyboard using LLM
         system_prompt = """You are an expert presentation designer. Create a compelling storyboard for a presentation.
@@ -76,12 +91,17 @@ async def _slide_make_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "synapse", "slide_make")
 
     try:
-        inp = msg.input or {}
-        storyboard = inp.get("storyboard", [])
-        topic = inp.get("topic", "")
+        # Validate input using Pydantic model
+        try:
+            req = SlideMakeRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for slide_make request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not storyboard:
-            raise InvalidInputError("Storyboard is required")
+        storyboard = req.storyboard
+        topic = req.topic
 
         # Generate slides using LLM
         system_prompt = """You are an expert presentation content writer. Create detailed slide content based on the storyboard.
@@ -143,13 +163,19 @@ async def _visualize_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "synapse", "visualize")
 
     try:
-        inp = msg.input or {}
-        data = inp.get("data", [])
-        description = inp.get("description", "")
-        viz_type = inp.get("viz_type", "auto")
+        # Validate input using Pydantic model
+        try:
+            req = VisualizeRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for visualize request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not data and not description:
-            raise InvalidInputError("Data or description is required")
+        data = req.data
+        description = req.description
+        viz_type = req.viz_type
 
         # Generate visualization spec using LLM
         system_prompt = """You are a data visualization expert. Create appropriate visualization specifications.
@@ -206,12 +232,22 @@ async def _export__handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "synapse", "export")
 
     try:
-        inp = msg.input or {}
-        title = inp.get("title", "Untitled Presentation")
-        slides = inp.get("slides", [])
-        layout_graph = inp.get("layout_graph", {})
-        notes = inp.get("notes", [])
-        metadata = inp.get("metadata", {})
+        # Validate input using Pydantic model
+        try:
+            req = ExportRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for export request",
+                {"validation_errors": e.errors()}
+            )
+
+        title = req.title
+        metadata = req.metadata
+
+        # For synapse, we expect slides/layout_graph/notes in metadata or sections
+        slides = metadata.get("slides", []) if isinstance(metadata, dict) else []
+        layout_graph = metadata.get("layout_graph", {}) if isinstance(metadata, dict) else {}
+        notes = metadata.get("notes", []) if isinstance(metadata, dict) else []
 
         output = {
             "artifact": {

@@ -3,14 +3,24 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import InvalidInputError, create_error_response
+from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
 from matrix.database import get_session_manager
+from matrix.api_models import (
+    OutlineRequest,
+    DraftRequest,
+    EditRequest,
+    SummarizeRequest,
+    ExportRequest
+)
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
 app = FastAPI(title="Osteon")
 setup_instrumentation(app, service_name="osteon", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("osteon")
 
 # Setup comprehensive health and readiness endpoints
@@ -31,13 +41,19 @@ async def _outline_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "osteon", "outline")
 
     try:
-        inp = msg.input or {}
-        goal = inp.get("goal", "")
-        topic = inp.get("topic", goal)
-        context = inp.get("context", "")
+        # Validate input using Pydantic model
+        try:
+            req = OutlineRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for outline request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not topic:
-            raise InvalidInputError("Topic or goal is required")
+        goal = req.goal
+        topic = req.topic or goal
+        context = req.context
 
         # Generate outline using LLM
         system_prompt = """You are an expert content strategist. Generate a detailed, well-structured outline for the given topic.
@@ -82,14 +98,20 @@ async def _draft_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "osteon", "draft")
 
     try:
-        inp = msg.input or {}
-        goal = inp.get("goal", "")
-        section_title = inp.get("section_title", "")
-        outline = inp.get("outline", [])
-        context = inp.get("context", "")
+        # Validate input using Pydantic model
+        try:
+            req = DraftRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for draft request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not goal and not section_title:
-            raise InvalidInputError("Goal or section_title is required")
+        goal = req.goal
+        section_title = req.section_title
+        outline = req.outline
+        context = req.context
 
         # Generate content using LLM
         system_prompt = """You are an expert writer. Generate high-quality, detailed content for the given section.
@@ -145,13 +167,18 @@ async def _edit_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "osteon", "edit")
 
     try:
-        inp = msg.input or {}
-        original_text = inp.get("text", "")
-        feedback = inp.get("feedback", "")
-        edit_type = inp.get("edit_type", "improve")
+        # Validate input using Pydantic model
+        try:
+            req = EditRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for edit request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not original_text:
-            raise InvalidInputError("Text is required for editing")
+        original_text = req.text
+        feedback = req.feedback
+        edit_type = req.edit_type
 
         # Generate edited content using LLM
         system_prompt = """You are an expert editor. Review and improve the given text based on the feedback provided.
@@ -210,13 +237,19 @@ async def _summarize_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "osteon", "summarize")
 
     try:
-        inp = msg.input or {}
-        text = inp.get("text", "")
-        sections = inp.get("sections", [])
-        max_length = inp.get("max_length", "medium")
+        # Validate input using Pydantic model
+        try:
+            req = SummarizeRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for summarize request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not text and not sections:
-            raise InvalidInputError("Text or sections are required for summarization")
+        text = req.text
+        sections = req.sections
+        max_length = req.max_length
 
         # Combine sections if provided
         if sections:
@@ -266,10 +299,18 @@ async def _export_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "osteon", "export")
 
     try:
-        inp = msg.input or {}
-        title = inp.get("title", "Untitled Document")
-        sections = inp.get("sections", [])
-        metadata = inp.get("metadata", {})
+        # Validate input using Pydantic model
+        try:
+            req = ExportRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for export request",
+                {"validation_errors": e.errors()}
+            )
+
+        title = req.title
+        sections = req.sections
+        metadata = req.metadata
 
         output = {
             "artifact": {
