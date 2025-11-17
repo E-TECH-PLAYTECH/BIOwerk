@@ -17,6 +17,11 @@ class InvalidInputError(BIOworkError):
     pass
 
 
+class ValidationError(BIOworkError):
+    """Raised when Pydantic validation fails or input sanitization detects malicious content."""
+    pass
+
+
 class AgentProcessingError(BIOworkError):
     """Raised when an agent fails to process a request."""
     pass
@@ -29,7 +34,7 @@ class AgentNotFoundError(BIOworkError):
 
 def create_error_response(msg_id: str, agent: str, error: Exception) -> Dict[str, Any]:
     """
-    Create a standardized error response.
+    Create a standardized error response that doesn't leak system information.
 
     Args:
         msg_id: The message ID from the request
@@ -37,15 +42,34 @@ def create_error_response(msg_id: str, agent: str, error: Exception) -> Dict[str
         error: The exception that occurred
 
     Returns:
-        Dictionary containing error details
+        Dictionary containing sanitized error details
     """
     import time
     from matrix.utils import state_hash
 
+    # Sanitize error message to prevent information leakage
+    error_type = type(error).__name__
+
+    # Only include detailed messages for known safe error types
+    safe_error_types = {
+        "InvalidInputError",
+        "ValidationError",
+        "AgentNotFoundError",
+        "BIOworkError"
+    }
+
+    if error_type in safe_error_types:
+        error_message = str(error)
+        error_details = getattr(error, "details", {})
+    else:
+        # Generic message for unexpected errors to prevent info leakage
+        error_message = "An internal error occurred. Please contact support."
+        error_details = {}
+
     error_output = {
-        "error": type(error).__name__,
-        "message": str(error),
-        "details": getattr(error, "details", {})
+        "error": error_type,
+        "message": error_message,
+        "details": error_details
     }
 
     return {

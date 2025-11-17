@@ -3,13 +3,22 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import InvalidInputError, create_error_response
+from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.api_models import (
+    IngestTableRequest,
+    FormulaEvalRequest,
+    ModelForecastRequest,
+    ExportRequest
+)
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
 app = FastAPI(title="Myocyte")
 setup_instrumentation(app, service_name="myocyte", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("myocyte")
 
 # Setup comprehensive health and readiness endpoints
@@ -26,12 +35,18 @@ async def _ingest_table_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "myocyte", "ingest_table")
 
     try:
-        inp = msg.input or {}
-        raw_data = inp.get("raw_data", "")
-        tables = inp.get("tables", [])
+        # Validate input using Pydantic model
+        try:
+            req = IngestTableRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for ingest_table request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not raw_data and not tables:
-            raise InvalidInputError("raw_data or tables is required")
+        raw_data = req.raw_data
+        tables = req.tables
 
         # If tables are already provided, analyze and enhance them
         if tables:
@@ -86,12 +101,17 @@ async def _formula_eval_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "myocyte", "formula_eval")
 
     try:
-        inp = msg.input or {}
-        tables = inp.get("tables", [])
-        formulas = inp.get("formulas", [])
+        # Validate input using Pydantic model
+        try:
+            req = FormulaEvalRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for formula_eval request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not tables:
-            raise InvalidInputError("tables is required")
+        tables = req.tables
+        formulas = req.formulas
 
         # If no formulas provided, generate insights
         if not formulas:
@@ -173,14 +193,20 @@ async def _model_forecast_handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "myocyte", "model_forecast")
 
     try:
-        inp = msg.input or {}
-        data = inp.get("data", [])
-        tables = inp.get("tables", [])
-        forecast_type = inp.get("forecast_type", "trend")
-        periods = inp.get("periods", 5)
+        # Validate input using Pydantic model
+        try:
+            req = ModelForecastRequest(**msg.input)
+            req.validate_required_fields()
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for model_forecast request",
+                {"validation_errors": e.errors()}
+            )
 
-        if not data and not tables:
-            raise InvalidInputError("data or tables is required")
+        data = req.data
+        tables = req.tables
+        forecast_type = req.forecast_type
+        periods = req.periods
 
         # Generate forecast using LLM
         system_prompt = """You are a data scientist and forecasting expert. Analyze the data and generate forecasts.
@@ -231,12 +257,23 @@ async def _export__handler(msg: Msg) -> Reply:
     log_request(logger, msg.id, "myocyte", "export")
 
     try:
-        inp = msg.input or {}
-        title = inp.get("title", "Untitled Data Analysis")
-        tables = inp.get("tables", [])
-        formulas = inp.get("formulas", [])
-        charts = inp.get("charts", [])
-        metadata = inp.get("metadata", {})
+        # Validate input using Pydantic model
+        try:
+            req = ExportRequest(**msg.input)
+        except PydanticValidationError as e:
+            raise ValidationError(
+                "Invalid input for export request",
+                {"validation_errors": e.errors()}
+            )
+
+        title = req.title
+        sections = req.sections
+        metadata = req.metadata
+
+        # For myocyte, we expect tables/formulas/charts in sections or metadata
+        tables = metadata.get("tables", []) if isinstance(metadata, dict) else []
+        formulas = metadata.get("formulas", []) if isinstance(metadata, dict) else []
+        charts = metadata.get("charts", []) if isinstance(metadata, dict) else []
 
         output = {
             "artifact": {

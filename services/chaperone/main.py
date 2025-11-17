@@ -3,14 +3,17 @@ from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
-from matrix.errors import InvalidInputError, create_error_response
+from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.validation import setup_validation_middleware
+from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 import base64
 
 app = FastAPI(title="Chaperone")
 setup_instrumentation(app, service_name="chaperone", service_version="1.0.0")
+setup_validation_middleware(app)
 logger = setup_logging("chaperone")
 
 # Setup comprehensive health and readiness endpoints
