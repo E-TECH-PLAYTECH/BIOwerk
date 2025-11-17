@@ -112,11 +112,395 @@ docker run -v $(pwd):/zap/wrk:rw \
 #### Infrastructure Security
 - Container image scanning (Trivy)
 - Network segmentation
-- Secrets management (environment variables, KMS)
+- Secrets management (see detailed section below)
 - Database connection pooling (PgBouncer)
 - Regular security updates
 
-### 5. GDPR Compliance
+#### Secrets Management
+- Environment variable-based configuration
+- No hardcoded credentials in codebase
+- Automated secret validation in CI/CD
+- Pre-commit hooks to prevent secret leaks
+- Production secrets via KMS (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault)
+- Regular secret rotation (90-day default)
+- See **Secrets Management** section below for details
+
+### 5. Secrets Management
+
+BIOwerk implements a comprehensive secrets management strategy to ensure credentials are never exposed in the codebase.
+
+#### Development Environment Secrets
+
+**Setup Process:**
+
+1. **Copy the example environment file:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Generate strong passwords:**
+   ```bash
+   # PostgreSQL password
+   openssl rand -base64 32
+
+   # MongoDB password
+   openssl rand -base64 32
+
+   # JWT secret key
+   openssl rand -hex 32
+
+   # Encryption master key
+   openssl rand -base64 32
+
+   # Grafana admin password
+   openssl rand -base64 32
+
+   # Grafana secret key
+   openssl rand -base64 32
+   ```
+
+3. **Update .env with generated secrets:**
+   - Replace all `<GENERATE_STRONG_PASSWORD_HERE>` placeholders
+   - Ensure all passwords are 32+ characters
+   - Never reuse passwords across services
+
+4. **Verify configuration:**
+   ```bash
+   # Check that secrets are properly configured
+   ./scripts/check_secrets.sh
+
+   # Start services (will fail if required secrets are missing)
+   docker-compose up -d
+   ```
+
+**Security Requirements:**
+- `.env` file MUST be in `.gitignore` (already configured)
+- Never commit `.env` files to version control
+- Use unique secrets for each environment (dev/staging/production)
+- Rotate development secrets every 90 days
+
+#### Production Secrets Management
+
+**CRITICAL**: Never use `.env` files in production. Use a secrets management service:
+
+##### AWS Secrets Manager
+
+```python
+# Example: Loading secrets from AWS Secrets Manager
+import boto3
+import json
+
+def get_secret(secret_name):
+    client = boto3.client('secretsmanager', region_name='us-east-1')
+    response = client.get_secret_value(SecretId=secret_name)
+    return json.loads(response['SecretString'])
+
+# Load database credentials
+db_secrets = get_secret('biowerk/production/database')
+postgres_password = db_secrets['postgres_password']
+mongo_password = db_secrets['mongo_password']
+```
+
+**Setup:**
+```bash
+# Store secrets in AWS Secrets Manager
+aws secretsmanager create-secret \
+  --name biowerk/production/database \
+  --secret-string '{
+    "postgres_password": "SECURE_PASSWORD",
+    "mongo_password": "SECURE_PASSWORD"
+  }'
+
+# Enable automatic rotation (90 days)
+aws secretsmanager rotate-secret \
+  --secret-id biowerk/production/database \
+  --rotation-lambda-arn arn:aws:lambda:region:account:function:rotation \
+  --rotation-rules AutomaticallyAfterDays=90
+```
+
+##### HashiCorp Vault
+
+```python
+# Example: Loading secrets from Vault
+import hvac
+
+client = hvac.Client(url='https://vault.example.com')
+client.auth.approle.login(role_id='...', secret_id='...')
+
+# Read database secrets
+db_secrets = client.secrets.kv.v2.read_secret_version(path='biowerk/database')
+postgres_password = db_secrets['data']['data']['postgres_password']
+```
+
+**Setup:**
+```bash
+# Enable KV secrets engine
+vault secrets enable -path=biowerk kv-v2
+
+# Store secrets
+vault kv put biowerk/database \
+  postgres_password="SECURE_PASSWORD" \
+  mongo_password="SECURE_PASSWORD"
+
+# Create policy for BIOwerk application
+vault policy write biowerk-app - <<EOF
+path "biowerk/*" {
+  capabilities = ["read", "list"]
+}
+EOF
+```
+
+##### Azure Key Vault
+
+```python
+# Example: Loading secrets from Azure Key Vault
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+credential = DefaultAzureCredential()
+client = SecretClient(
+    vault_url="https://biowerk-vault.vault.azure.net/",
+    credential=credential
+)
+
+postgres_password = client.get_secret("postgres-password").value
+```
+
+**Setup:**
+```bash
+# Create Key Vault
+az keyvault create \
+  --name biowerk-vault \
+  --resource-group biowerk-rg \
+  --location eastus
+
+# Store secrets
+az keyvault secret set \
+  --vault-name biowerk-vault \
+  --name postgres-password \
+  --value "SECURE_PASSWORD"
+
+# Grant access to managed identity
+az keyvault set-policy \
+  --name biowerk-vault \
+  --object-id <managed-identity-id> \
+  --secret-permissions get list
+```
+
+##### Google Cloud Secret Manager
+
+```python
+# Example: Loading secrets from GCP Secret Manager
+from google.cloud import secretmanager
+
+client = secretmanager.SecretManagerServiceClient()
+name = "projects/PROJECT_ID/secrets/postgres-password/versions/latest"
+response = client.access_secret_version(request={"name": name})
+postgres_password = response.payload.data.decode("UTF-8")
+```
+
+**Setup:**
+```bash
+# Create secret
+gcloud secrets create postgres-password \
+  --data-file=- <<< "SECURE_PASSWORD"
+
+# Grant access to service account
+gcloud secrets add-iam-policy-binding postgres-password \
+  --member="serviceAccount:biowerk@PROJECT.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+#### Secret Rotation Procedures
+
+**Automated Rotation (Recommended):**
+
+1. **AWS Secrets Manager Rotation:**
+   - Configure Lambda rotation function
+   - Set rotation schedule (90 days default)
+   - Automatic credential updates
+
+2. **Vault Dynamic Secrets:**
+   - Use database secret engine
+   - Credentials generated on-demand
+   - Automatic revocation on TTL expiry
+
+**Manual Rotation Process:**
+
+```bash
+# 1. Generate new credentials
+NEW_PASSWORD=$(openssl rand -base64 32)
+
+# 2. Update database password
+psql -U postgres -c "ALTER USER biowerk PASSWORD '$NEW_PASSWORD';"
+
+# 3. Update secret in secrets manager
+aws secretsmanager update-secret \
+  --secret-id biowerk/production/database \
+  --secret-string "{\"postgres_password\": \"$NEW_PASSWORD\"}"
+
+# 4. Rolling restart of services to pick up new secret
+kubectl rollout restart deployment/biowerk-mesh
+```
+
+**Rotation Schedule:**
+- Production: Every 90 days (automated)
+- Staging: Every 90 days
+- Development: Every 90 days or on compromise
+- Emergency rotation: Within 4 hours of suspected compromise
+
+#### Secret Validation
+
+**Pre-Commit Hook:**
+Automatically runs before every commit to detect secrets:
+```bash
+# Install pre-commit hooks
+pip install pre-commit
+pre-commit install
+
+# Runs automatically on commit, or manually:
+pre-commit run --all-files
+```
+
+**CI/CD Validation:**
+Every PR and push is automatically scanned:
+- Hardcoded password detection
+- Default credential detection
+- AWS key detection
+- Private key detection
+- TruffleHog secret scanning
+
+**Manual Validation:**
+```bash
+# Run custom secrets check
+./scripts/check_secrets.sh
+
+# Expected output:
+# ✓ No hardcoded secrets found
+# ✓ No weak passwords detected
+# ✓ .env.example exists and is clean
+# ✓ No exposed credentials in connection strings
+```
+
+#### Docker Compose Secret Requirements
+
+BIOwerk's `docker-compose.yml` enforces explicit secret configuration:
+
+```yaml
+# ❌ BEFORE: Hardcoded password (INSECURE)
+environment:
+  POSTGRES_PASSWORD: biowerk_dev_password
+
+# ✅ AFTER: Required environment variable
+environment:
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required - see .env.example}
+```
+
+**Behavior:**
+- Docker Compose will FAIL to start if required secrets are not set
+- No default passwords are provided
+- Clear error messages guide developers to `.env.example`
+
+**Example error when secrets are missing:**
+```
+ERROR: The POSTGRES_PASSWORD variable is not set. POSTGRES_PASSWORD is required - see .env.example
+```
+
+#### Secret Storage Best Practices
+
+**DO:**
+- ✅ Use environment variables for all secrets
+- ✅ Use secrets management services in production
+- ✅ Rotate secrets regularly (90-day default)
+- ✅ Use strong, randomly generated passwords (32+ chars)
+- ✅ Different secrets for each environment
+- ✅ Backup encryption keys securely offline
+- ✅ Audit secret access logs
+- ✅ Use least privilege access
+
+**DON'T:**
+- ❌ Never commit secrets to version control
+- ❌ Never hardcode secrets in code
+- ❌ Never reuse passwords across environments
+- ❌ Never share secrets via email/Slack
+- ❌ Never log secrets in application logs
+- ❌ Never use default/weak passwords
+- ❌ Never skip secret rotation
+
+#### Emergency Secret Compromise Response
+
+If a secret is compromised:
+
+1. **Immediate Actions (within 1 hour):**
+   ```bash
+   # 1. Rotate compromised credential immediately
+   NEW_SECRET=$(openssl rand -base64 32)
+
+   # 2. Update in secrets manager
+   aws secretsmanager update-secret --secret-id COMPROMISED_SECRET --secret-string "$NEW_SECRET"
+
+   # 3. Restart affected services
+   kubectl rollout restart deployment/affected-service
+
+   # 4. Invalidate active sessions if auth secret compromised
+   redis-cli FLUSHDB  # Flush session cache
+   ```
+
+2. **Investigation (within 4 hours):**
+   - Review audit logs for unauthorized access
+   - Identify scope of compromise
+   - Check for lateral movement
+
+3. **Communication (within 8 hours):**
+   - Notify security team
+   - Document incident timeline
+   - Prepare post-mortem
+
+4. **Follow-up (within 24 hours):**
+   - Rotate all related secrets
+   - Review and update security controls
+   - Conduct team training if needed
+
+#### Monitoring & Alerting
+
+**Secret Access Monitoring:**
+- All secret reads from KMS are logged
+- Unusual access patterns trigger alerts
+- Failed authentication attempts monitored
+
+**Alerts:**
+- Multiple failed authentication attempts (>5 in 1 hour)
+- Secret access from unusual IP/location
+- Secret read without corresponding deployment
+- Expired secrets detected
+- Weak password patterns detected
+
+**Dashboards:**
+- Secret rotation status
+- Secret age (days since last rotation)
+- Secret access frequency
+- Failed authentication attempts
+
+#### Compliance Requirements
+
+**GDPR/HIPAA:**
+- Encryption keys must be rotated every 90 days
+- Access to secrets must be audited
+- Secrets must be encrypted at rest and in transit
+
+**SOC 2:**
+- Documented secret management procedures
+- Regular access reviews
+- Incident response for compromised secrets
+- Annual penetration testing
+
+**ISO 27001:**
+- Classified secret inventory
+- Access control based on least privilege
+- Regular security awareness training
+- Documented key management procedures
+
+### 6. GDPR Compliance
 
 BIOwerk includes dedicated GDPR compliance features:
 
@@ -276,17 +660,27 @@ bandit -r matrix/ mesh/ services/
 trivy image biowerk-mesh:latest
 ```
 
-### Environment Variables for Security
+### Required Environment Variables
 
+All secrets must be configured via environment variables. See `.env.example` for a complete list.
+
+**Critical Secrets (REQUIRED):**
 ```bash
-# Authentication
-JWT_SECRET_KEY=<strong-random-key>
-REQUIRE_AUTH=true
+# Database Credentials (generate with: openssl rand -base64 32)
+POSTGRES_PASSWORD=<GENERATE_STRONG_PASSWORD>
+MONGO_INITDB_ROOT_PASSWORD=<GENERATE_STRONG_PASSWORD>
 
-# Encryption
-ENCRYPTION_MASTER_KEY=<32-char-minimum>
-ENCRYPTION_KEY_ROTATION_DAYS=90
+# Application Secrets (generate with: openssl rand -hex 32)
+JWT_SECRET_KEY=<GENERATE_STRONG_SECRET>
+ENCRYPTION_MASTER_KEY=<GENERATE_STRONG_KEY>
 
+# Grafana Credentials
+GRAFANA_ADMIN_PASSWORD=<GENERATE_STRONG_PASSWORD>
+GRAFANA_SECRET_KEY=<GENERATE_STRONG_SECRET>
+```
+
+**Security Configuration (OPTIONAL):**
+```bash
 # TLS/HTTPS
 TLS_ENABLED=true
 TLS_CERT_FILE=/path/to/cert.pem
@@ -298,13 +692,43 @@ RATE_LIMIT_ENABLED=true
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=60
 
+# Authentication
+REQUIRE_AUTH=false  # Set to true in production
+
 # Audit Logging
 AUDIT_ENABLED=true
 AUDIT_ENCRYPT_SENSITIVE=true
+
+# Key Rotation
+ENCRYPTION_KEY_ROTATION_DAYS=90
+```
+
+**Secret Generation Commands:**
+```bash
+# Generate all required secrets at once
+cat > .env << 'EOF'
+# Database Credentials
+POSTGRES_PASSWORD=$(openssl rand -base64 32)
+MONGO_INITDB_ROOT_PASSWORD=$(openssl rand -base64 32)
+
+# Application Secrets
+JWT_SECRET_KEY=$(openssl rand -hex 32)
+ENCRYPTION_MASTER_KEY=$(openssl rand -base64 32)
+
+# Grafana Credentials
+GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 32)
+GRAFANA_SECRET_KEY=$(openssl rand -base64 32)
+EOF
+
+# Then manually replace the $(...) with actual generated values
 ```
 
 ---
 
-**Last Updated**: 2025-11-16
-**Document Version**: 1.0
+**Last Updated**: 2025-11-17
+**Document Version**: 2.0
 **Security Team**: security@biowerk.example.com
+
+**Version History:**
+- v2.0 (2025-11-17): Added comprehensive secrets management documentation
+- v1.0 (2025-11-16): Initial security documentation

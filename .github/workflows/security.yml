@@ -123,6 +123,34 @@ jobs:
         with:
           fetch-depth: 0  # Full history for secret scanning
 
+      - name: Check for hardcoded secrets (custom validation)
+        run: |
+          echo "Running BIOwerk custom secrets validation..."
+          chmod +x scripts/check_secrets.sh
+          ./scripts/check_secrets.sh
+
+      - name: Verify no default passwords in docker-compose.yml
+        run: |
+          echo "Checking docker-compose.yml for default passwords..."
+          if grep -E "biowerk_dev_password|dev-secret-key|changeme|admin:admin" docker-compose.yml; then
+            echo "❌ ERROR: Found hardcoded default passwords in docker-compose.yml"
+            exit 1
+          fi
+          echo "✅ No default passwords found"
+
+      - name: Verify .env.example exists and is clean
+        run: |
+          echo "Checking .env.example..."
+          if [ ! -f ".env.example" ]; then
+            echo "❌ ERROR: .env.example not found"
+            exit 1
+          fi
+          if grep -E "biowerk_dev_password|changeme" .env.example; then
+            echo "❌ ERROR: .env.example contains real secrets"
+            exit 1
+          fi
+          echo "✅ .env.example is properly configured"
+
       - name: Run TruffleHog secrets scanner
         uses: trufflesecurity/trufflehog@main
         with:
@@ -193,7 +221,7 @@ jobs:
           echo "### Scan Results" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Dependency Scan: ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Docker Image Scan: ${{ needs.docker-scan.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Secrets Scan: ${{ needs.secrets-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Secrets Scan (incl. hardcoded password check): ${{ needs.secrets-scan.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Code Quality: ${{ needs.code-quality.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Additional Security Testing" >> $GITHUB_STEP_SUMMARY

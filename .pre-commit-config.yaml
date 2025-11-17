@@ -4,6 +4,17 @@
 # Run manually: pre-commit run --all-files
 
 repos:
+  # Security: Custom secrets validation (BIOwerk-specific)
+  - repo: local
+    hooks:
+      - id: check-secrets
+        name: Check for hardcoded secrets
+        entry: scripts/check_secrets.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [commit]
+
   # Security: Check for secrets and credentials
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
