@@ -74,8 +74,7 @@ async def health():
     }
 
 
-@app.post("/translate", response_model=ServiceCall)
-async def translate_request(request: UserRequest):
+async def _translate_handler(request: UserRequest) -> ServiceCall:
     """
     Translate natural language into structured service calls.
 
@@ -134,8 +133,7 @@ Respond with ONLY valid JSON, no explanations."""
         raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
 
 
-@app.post("/chat")
-async def chat(request: UserRequest):
+async def _chat_handler(request: UserRequest):
     """
     Have a conversation with Larry.
     He'll help you understand what you can do with BIOwerk.
@@ -173,6 +171,43 @@ Keep responses concise but friendly."""
     except Exception as e:
         logger.error(f"❌ Larry failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/translate", response_model=ServiceCall)
+async def translate_v1(request: UserRequest):
+    """Translate natural language into structured service calls (API v1)."""
+    return await _translate_handler(request)
+
+@app.post("/v1/chat")
+async def chat_v1(request: UserRequest):
+    """Have a conversation with Larry (API v1)."""
+    return await _chat_handler(request)
+
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/translate", response_model=ServiceCall)
+async def translate_legacy(request: UserRequest):
+    """
+    DEPRECATED: Use /v1/translate instead.
+    Translate natural language into structured service calls.
+    """
+    logger.warning("Deprecated endpoint /translate used. Please migrate to /v1/translate")
+    return await _translate_handler(request)
+
+@app.post("/chat")
+async def chat_legacy(request: UserRequest):
+    """
+    DEPRECATED: Use /v1/chat instead.
+    Have a conversation with Larry.
+    """
+    logger.warning("Deprecated endpoint /chat used. Please migrate to /v1/chat")
+    return await _chat_handler(request)
 
 
 if __name__ == "__main__":

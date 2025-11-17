@@ -97,8 +97,7 @@ async def health():
     }
 
 
-@app.get("/check/{service}")
-async def check_service(service: str):
+async def _check_service_handler(service: str):
     """Check health of a specific service."""
     if service not in SERVICES:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
@@ -159,12 +158,11 @@ async def check_service(service: str):
         return status
 
 
-@app.get("/check-all")
-async def check_all_services():
+async def _check_all_handler():
     """Check health of all services."""
     logger.info("🎭 Harry checking all services...")
 
-    tasks = [check_service(service) for service in SERVICES.keys()]
+    tasks = [_check_service_handler(service) for service in SERVICES.keys()]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     statuses = []
@@ -194,8 +192,7 @@ async def check_all_services():
     }
 
 
-@app.post("/analyze")
-async def analyze_system():
+async def _analyze_handler():
     """
     Use Harry's AI to analyze system health and provide recommendations.
     """
@@ -246,8 +243,7 @@ Be concise but helpful. Respond in JSON format with: {assessment, issues, recomm
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
-@app.get("/history/{service}")
-async def get_service_history(service: str, limit: int = 10):
+async def _history_handler(service: str, limit: int = 10):
     """Get health check history for a service."""
     if service not in SERVICES:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
@@ -260,6 +256,71 @@ async def get_service_history(service: str, limit: int = 10):
         "history": history[-limit:],
         "total_checks": len(history)
     }
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.get("/v1/check/{service}")
+async def check_service_v1(service: str):
+    """Check health of a specific service (API v1)."""
+    return await _check_service_handler(service)
+
+@app.get("/v1/check-all")
+async def check_all_v1():
+    """Check health of all services (API v1)."""
+    return await _check_all_handler()
+
+@app.post("/v1/analyze")
+async def analyze_v1():
+    """Analyze system health using Harry's AI brain (API v1)."""
+    return await _analyze_handler()
+
+@app.get("/v1/history/{service}")
+async def history_v1(service: str, limit: int = 10):
+    """Get health check history for a service (API v1)."""
+    return await _history_handler(service, limit)
+
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.get("/check/{service}")
+async def check_service_legacy(service: str):
+    """
+    DEPRECATED: Use /v1/check/{service} instead.
+    Check health of a specific service.
+    """
+    logger.warning(f"Deprecated endpoint /check/{service} used. Please migrate to /v1/check/{service}")
+    return await _check_service_handler(service)
+
+@app.get("/check-all")
+async def check_all_legacy():
+    """
+    DEPRECATED: Use /v1/check-all instead.
+    Check health of all services.
+    """
+    logger.warning("Deprecated endpoint /check-all used. Please migrate to /v1/check-all")
+    return await _check_all_handler()
+
+@app.post("/analyze")
+async def analyze_legacy():
+    """
+    DEPRECATED: Use /v1/analyze instead.
+    Analyze system health using Harry's AI brain.
+    """
+    logger.warning("Deprecated endpoint /analyze used. Please migrate to /v1/analyze")
+    return await _analyze_handler()
+
+@app.get("/history/{service}")
+async def history_legacy(service: str, limit: int = 10):
+    """
+    DEPRECATED: Use /v1/history/{service} instead.
+    Get health check history for a service.
+    """
+    logger.warning(f"Deprecated endpoint /history/{service} used. Please migrate to /v1/history/{service}")
+    return await _history_handler(service, limit)
 
 
 if __name__ == "__main__":

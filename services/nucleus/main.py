@@ -24,8 +24,11 @@ AGENTS = {
     "circadian": "http://mesh:8080/circadian",
 }
 
-@app.post("/plan", response_model=Reply)
-async def plan(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _plan_handler(msg: Msg) -> Reply:
     """Generate an execution plan for complex workflows."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "plan")
@@ -93,8 +96,7 @@ Generate a step-by-step plan with proper dependencies."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
-@app.post("/route", response_model=Reply)
-async def route(msg: Msg):
+async def _route_handler(msg: Msg) -> Reply:
     """Intelligently route requests to appropriate services."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "route")
@@ -152,8 +154,7 @@ Determine the best agent and endpoint to handle this request."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
-@app.post("/review", response_model=Reply)
-async def review(msg: Msg):
+async def _review_handler(msg: Msg) -> Reply:
     """Review and validate outputs against quality criteria."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "review")
@@ -209,8 +210,7 @@ Provide a detailed review with scores and feedback."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "nucleus", e))
 
-@app.post("/finalize", response_model=Reply)
-async def finalize(msg: Msg):
+async def _finalize_handler(msg: Msg) -> Reply:
     """Finalize and package workflow results."""
     start_time = time.time()
     log_request(logger, msg.id, "nucleus", "finalize")
@@ -264,3 +264,67 @@ Create a comprehensive summary and final status."""
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "nucleus", e))
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/plan", response_model=Reply)
+async def plan_v1(msg: Msg):
+    """Plan endpoint (API v1)."""
+    return await _plan_handler(msg)
+
+@app.post("/v1/route", response_model=Reply)
+async def route_v1(msg: Msg):
+    """Route endpoint (API v1)."""
+    return await _route_handler(msg)
+
+@app.post("/v1/review", response_model=Reply)
+async def review_v1(msg: Msg):
+    """Review endpoint (API v1)."""
+    return await _review_handler(msg)
+
+@app.post("/v1/finalize", response_model=Reply)
+async def finalize_v1(msg: Msg):
+    """Finalize endpoint (API v1)."""
+    return await _finalize_handler(msg)
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/plan", response_model=Reply)
+async def plan_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/plan instead.
+    Plan endpoint.
+    """
+    logger.warning("Deprecated endpoint /plan used. Please migrate to /v1/plan")
+    return await _plan_handler(msg)
+
+@app.post("/route", response_model=Reply)
+async def route_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/route instead.
+    Route endpoint.
+    """
+    logger.warning("Deprecated endpoint /route used. Please migrate to /v1/route")
+    return await _route_handler(msg)
+
+@app.post("/review", response_model=Reply)
+async def review_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/review instead.
+    Review endpoint.
+    """
+    logger.warning("Deprecated endpoint /review used. Please migrate to /v1/review")
+    return await _review_handler(msg)
+
+@app.post("/finalize", response_model=Reply)
+async def finalize_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/finalize instead.
+    Finalize endpoint.
+    """
+    logger.warning("Deprecated endpoint /finalize used. Please migrate to /v1/finalize")
+    return await _finalize_handler(msg)

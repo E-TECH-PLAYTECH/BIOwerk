@@ -21,8 +21,11 @@ setup_health_endpoints(app, service_name="osteon", version="1.0.0")
 # Uses 1-hour TTL for document generation workflows
 session_mgr = get_session_manager("default")
 
-@app.post("/outline", response_model=Reply)
-async def outline(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _outline_handler(msg: Msg) -> Reply:
     """Generate a structured outline for a document based on the goal/topic."""
     start_time = time.time()
     log_request(logger, msg.id, "osteon", "outline")
@@ -73,8 +76,7 @@ Generate a comprehensive outline with 5-8 main sections that would make for a we
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "osteon", e))
 
-@app.post("/draft", response_model=Reply)
-async def draft(msg: Msg):
+async def _draft_handler(msg: Msg) -> Reply:
     """Generate draft content for sections."""
     start_time = time.time()
     log_request(logger, msg.id, "osteon", "draft")
@@ -137,8 +139,7 @@ Write 2-3 paragraphs introducing the topic and setting the stage."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "osteon", e))
 
-@app.post("/edit", response_model=Reply)
-async def edit(msg: Msg):
+async def _edit_handler(msg: Msg) -> Reply:
     """Edit and improve content based on feedback."""
     start_time = time.time()
     log_request(logger, msg.id, "osteon", "edit")
@@ -203,8 +204,7 @@ Provide the edited version."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "osteon", e))
 
-@app.post("/summarize", response_model=Reply)
-async def summarize(msg: Msg):
+async def _summarize_handler(msg: Msg) -> Reply:
     """Summarize content."""
     start_time = time.time()
     log_request(logger, msg.id, "osteon", "summarize")
@@ -260,8 +260,7 @@ Provide a clear, comprehensive summary."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "osteon", e))
 
-@app.post("/export", response_model=Reply)
-async def export_(msg: Msg):
+async def _export_handler(msg: Msg) -> Reply:
     """Export the complete artifact with all sections."""
     start_time = time.time()
     log_request(logger, msg.id, "osteon", "export")
@@ -295,3 +294,81 @@ async def export_(msg: Msg):
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "osteon", e))
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/outline", response_model=Reply)
+async def outline_v1(msg: Msg):
+    """Generate a structured outline for a document based on the goal/topic (API v1)."""
+    return await _outline_handler(msg)
+
+@app.post("/v1/draft", response_model=Reply)
+async def draft_v1(msg: Msg):
+    """Generate draft content for sections (API v1)."""
+    return await _draft_handler(msg)
+
+@app.post("/v1/edit", response_model=Reply)
+async def edit_v1(msg: Msg):
+    """Edit and improve content based on feedback (API v1)."""
+    return await _edit_handler(msg)
+
+@app.post("/v1/summarize", response_model=Reply)
+async def summarize_v1(msg: Msg):
+    """Summarize content (API v1)."""
+    return await _summarize_handler(msg)
+
+@app.post("/v1/export", response_model=Reply)
+async def export_v1(msg: Msg):
+    """Export the complete artifact with all sections (API v1)."""
+    return await _export_handler(msg)
+
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/outline", response_model=Reply)
+async def outline_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/outline instead.
+    Generate a structured outline for a document based on the goal/topic.
+    """
+    logger.warning("Deprecated endpoint /outline used. Please migrate to /v1/outline")
+    return await _outline_handler(msg)
+
+@app.post("/draft", response_model=Reply)
+async def draft_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/draft instead.
+    Generate draft content for sections.
+    """
+    logger.warning("Deprecated endpoint /draft used. Please migrate to /v1/draft")
+    return await _draft_handler(msg)
+
+@app.post("/edit", response_model=Reply)
+async def edit_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/edit instead.
+    Edit and improve content based on feedback.
+    """
+    logger.warning("Deprecated endpoint /edit used. Please migrate to /v1/edit")
+    return await _edit_handler(msg)
+
+@app.post("/summarize", response_model=Reply)
+async def summarize_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/summarize instead.
+    Summarize content.
+    """
+    logger.warning("Deprecated endpoint /summarize used. Please migrate to /v1/summarize")
+    return await _summarize_handler(msg)
+
+@app.post("/export", response_model=Reply)
+async def export_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export instead.
+    Export the complete artifact with all sections.
+    """
+    logger.warning("Deprecated endpoint /export used. Please migrate to /v1/export")
+    return await _export_handler(msg)

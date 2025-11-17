@@ -79,8 +79,11 @@ def get_client_info(request: Request) -> Dict[str, str]:
 # Data Access Requests (Article 15)
 # ============================================================================
 
-@app.post("/request/access", response_model=Reply)
-async def create_access_request(
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _create_access_request_handler(
     msg: Msg,
     request: Request,
     gdpr: GDPRService = Depends(get_gdpr_service)
@@ -141,8 +144,7 @@ async def create_access_request(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/export/generate", response_model=Reply)
-async def generate_export(
+async def _generate_export_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -198,8 +200,7 @@ async def generate_export(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/export/data", response_model=Reply)
-async def export_user_data(
+async def _export_user_data_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -253,8 +254,7 @@ async def export_user_data(
 # Right to Erasure / Right to be Forgotten (Article 17)
 # ============================================================================
 
-@app.post("/request/erasure", response_model=Reply)
-async def create_erasure_request(
+async def _create_erasure_request_handler(
     msg: Msg,
     request: Request,
     gdpr: GDPRService = Depends(get_gdpr_service)
@@ -317,8 +317,7 @@ async def create_erasure_request(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/anonymize", response_model=Reply)
-async def anonymize_user(
+async def _anonymize_user_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -372,8 +371,7 @@ async def anonymize_user(
 # Consent Management (Article 7)
 # ============================================================================
 
-@app.post("/consent/record", response_model=Reply)
-async def record_consent(
+async def _record_consent_handler(
     msg: Msg,
     request: Request,
     gdpr: GDPRService = Depends(get_gdpr_service)
@@ -448,8 +446,7 @@ async def record_consent(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/consent/withdraw", response_model=Reply)
-async def withdraw_consent(
+async def _withdraw_consent_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -501,8 +498,7 @@ async def withdraw_consent(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/consent/check", response_model=Reply)
-async def check_consent(
+async def _check_consent_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -550,8 +546,7 @@ async def check_consent(
 # Privacy Settings
 # ============================================================================
 
-@app.post("/privacy/settings/get", response_model=Reply)
-async def get_privacy_settings(
+async def _get_privacy_settings_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -605,8 +600,7 @@ async def get_privacy_settings(
         return Reply(**create_error_response(msg.id, "gdpr", e))
 
 
-@app.post("/privacy/settings/update", response_model=Reply)
-async def update_privacy_settings(
+async def _update_privacy_settings_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -654,8 +648,7 @@ async def update_privacy_settings(
 # Data Retention (Article 5)
 # ============================================================================
 
-@app.post("/retention/enforce", response_model=Reply)
-async def enforce_retention_policies(
+async def _enforce_retention_policies_handler(
     msg: Msg,
     gdpr: GDPRService = Depends(get_gdpr_service)
 ):
@@ -707,6 +700,171 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "compliance_standards": ["GDPR", "CCPA", "HIPAA", "PCI-DSS"]
     }
+
+
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/request/access", response_model=Reply)
+async def create_access_request_v1(msg: Msg):
+    """Create Access Request (API v1)."""
+    return await _create_access_request_handler(msg)
+
+@app.post("/v1/export/generate", response_model=Reply)
+async def generate_export_v1(msg: Msg):
+    """Generate Export (API v1)."""
+    return await _generate_export_handler(msg)
+
+@app.post("/v1/export/data", response_model=Reply)
+async def export_user_data_v1(msg: Msg):
+    """Export User Data (API v1)."""
+    return await _export_user_data_handler(msg)
+
+@app.post("/v1/request/erasure", response_model=Reply)
+async def create_erasure_request_v1(msg: Msg):
+    """Create Erasure Request (API v1)."""
+    return await _create_erasure_request_handler(msg)
+
+@app.post("/v1/anonymize", response_model=Reply)
+async def anonymize_user_v1(msg: Msg):
+    """Anonymize User (API v1)."""
+    return await _anonymize_user_handler(msg)
+
+@app.post("/v1/consent/record", response_model=Reply)
+async def record_consent_v1(msg: Msg):
+    """Record Consent (API v1)."""
+    return await _record_consent_handler(msg)
+
+@app.post("/v1/consent/withdraw", response_model=Reply)
+async def withdraw_consent_v1(msg: Msg):
+    """Withdraw Consent (API v1)."""
+    return await _withdraw_consent_handler(msg)
+
+@app.post("/v1/consent/check", response_model=Reply)
+async def check_consent_v1(msg: Msg):
+    """Check Consent (API v1)."""
+    return await _check_consent_handler(msg)
+
+@app.post("/v1/privacy/settings/get", response_model=Reply)
+async def get_privacy_settings_v1(msg: Msg):
+    """Get Privacy Settings (API v1)."""
+    return await _get_privacy_settings_handler(msg)
+
+@app.post("/v1/privacy/settings/update", response_model=Reply)
+async def update_privacy_settings_v1(msg: Msg):
+    """Update Privacy Settings (API v1)."""
+    return await _update_privacy_settings_handler(msg)
+
+@app.post("/v1/retention/enforce", response_model=Reply)
+async def enforce_retention_policies_v1(msg: Msg):
+    """Enforce Retention Policies (API v1)."""
+    return await _enforce_retention_policies_handler(msg)
+
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/request/access", response_model=Reply)
+async def create_access_request_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/request/access instead.
+    Create Access Request.
+    """
+    logger.warning("Deprecated endpoint /request/access used. Please migrate to /v1/request/access")
+    return await _create_access_request_handler(msg)
+
+@app.post("/export/generate", response_model=Reply)
+async def generate_export_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export/generate instead.
+    Generate Export.
+    """
+    logger.warning("Deprecated endpoint /export/generate used. Please migrate to /v1/export/generate")
+    return await _generate_export_handler(msg)
+
+@app.post("/export/data", response_model=Reply)
+async def export_user_data_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export/data instead.
+    Export User Data.
+    """
+    logger.warning("Deprecated endpoint /export/data used. Please migrate to /v1/export/data")
+    return await _export_user_data_handler(msg)
+
+@app.post("/request/erasure", response_model=Reply)
+async def create_erasure_request_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/request/erasure instead.
+    Create Erasure Request.
+    """
+    logger.warning("Deprecated endpoint /request/erasure used. Please migrate to /v1/request/erasure")
+    return await _create_erasure_request_handler(msg)
+
+@app.post("/anonymize", response_model=Reply)
+async def anonymize_user_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/anonymize instead.
+    Anonymize User.
+    """
+    logger.warning("Deprecated endpoint /anonymize used. Please migrate to /v1/anonymize")
+    return await _anonymize_user_handler(msg)
+
+@app.post("/consent/record", response_model=Reply)
+async def record_consent_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/consent/record instead.
+    Record Consent.
+    """
+    logger.warning("Deprecated endpoint /consent/record used. Please migrate to /v1/consent/record")
+    return await _record_consent_handler(msg)
+
+@app.post("/consent/withdraw", response_model=Reply)
+async def withdraw_consent_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/consent/withdraw instead.
+    Withdraw Consent.
+    """
+    logger.warning("Deprecated endpoint /consent/withdraw used. Please migrate to /v1/consent/withdraw")
+    return await _withdraw_consent_handler(msg)
+
+@app.post("/consent/check", response_model=Reply)
+async def check_consent_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/consent/check instead.
+    Check Consent.
+    """
+    logger.warning("Deprecated endpoint /consent/check used. Please migrate to /v1/consent/check")
+    return await _check_consent_handler(msg)
+
+@app.post("/privacy/settings/get", response_model=Reply)
+async def get_privacy_settings_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/privacy/settings/get instead.
+    Get Privacy Settings.
+    """
+    logger.warning("Deprecated endpoint /privacy/settings/get used. Please migrate to /v1/privacy/settings/get")
+    return await _get_privacy_settings_handler(msg)
+
+@app.post("/privacy/settings/update", response_model=Reply)
+async def update_privacy_settings_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/privacy/settings/update instead.
+    Update Privacy Settings.
+    """
+    logger.warning("Deprecated endpoint /privacy/settings/update used. Please migrate to /v1/privacy/settings/update")
+    return await _update_privacy_settings_handler(msg)
+
+@app.post("/retention/enforce", response_model=Reply)
+async def enforce_retention_policies_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/retention/enforce instead.
+    Enforce Retention Policies.
+    """
+    logger.warning("Deprecated endpoint /retention/enforce used. Please migrate to /v1/retention/enforce")
+    return await _enforce_retention_policies_handler(msg)
 
 
 if __name__ == "__main__":

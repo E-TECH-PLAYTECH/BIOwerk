@@ -21,8 +21,11 @@ docker compose up --build
 # 2) Open gateway (Mesh) docs:
 # http://localhost:8080/docs
 
-# 3) Try a draft with Osteon (Writer analogue):
-curl -X POST http://localhost:8080/osteon/draft -H 'Content-Type: application/json' -d @examples/osteon_draft.json
+# 3) Try a draft with Osteon (Writer analogue) using API v1:
+curl -X POST http://localhost:8080/v1/osteon/draft -H 'Content-Type: application/json' -d @examples/osteon_draft.json
+
+# Note: Legacy unversioned endpoints still work but are deprecated:
+# curl -X POST http://localhost:8080/osteon/draft ...
 ```
 
 Need ongoing service insight? See [Operations](#operations) for observability and continuity guidance.
@@ -107,6 +110,30 @@ python scripts/security_scan.py --deps-only
 - JSON-RPC–style payloads with canonical JSON and BLAKE3 state hashes.
 - The **Mesh gateway** exposes a unified API surface and routes messages to agents.
 - **Matrix** provides shared libs for canonicalization, hashing, and message schemas.
+
+### API Versioning
+
+BIOwerk implements comprehensive URL path-based API versioning for backward compatibility:
+
+- **Format**: All endpoints use `/v{version}/` prefix (e.g., `/v1/osteon/draft`)
+- **Current Version**: API v1 (stable)
+- **Backward Compatibility**: Legacy unversioned endpoints still work with deprecation warnings
+- **Auto-negotiation**: Defaults to latest version when no version specified
+
+**Examples:**
+```bash
+# Versioned endpoint (recommended)
+curl -X POST http://localhost:8080/v1/osteon/draft \
+  -H 'Content-Type: application/json' \
+  -d @examples/osteon_draft.json
+
+# Legacy endpoint (works but deprecated)
+curl -X POST http://localhost:8080/osteon/draft \
+  -H 'Content-Type: application/json' \
+  -d @examples/osteon_draft.json
+```
+
+**See:** [docs/API_VERSIONING.md](docs/API_VERSIONING.md) for complete versioning guide and migration instructions.
 
 ### Service Mesh Resilience
 
