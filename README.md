@@ -1,5 +1,9 @@
 # Bio-Themed Agentic Office Suite (CODEX scaffold)
 
+[![codecov](https://codecov.io/gh/E-TECH-PLAYTECH/BIOwerk/branch/main/graph/badge.svg)](https://codecov.io/gh/E-TECH-PLAYTECH/BIOwerk)
+[![Tests](https://github.com/E-TECH-PLAYTECH/BIOwerk/workflows/Tests/badge.svg)](https://github.com/E-TECH-PLAYTECH/BIOwerk/actions)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A580%25-brightgreen)](https://github.com/E-TECH-PLAYTECH/BIOwerk)
+
 This repository is a production-oriented scaffold for an **agentic AI app suite** using biological/physical metaphors:
 
 - **Nucleus** (Director/orchestrator)
