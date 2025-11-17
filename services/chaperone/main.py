@@ -17,8 +17,11 @@ logger = setup_logging("chaperone")
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="chaperone", version="1.0.0")
 
-@app.post("/import_artifact", response_model=Reply)
-async def import_artifact(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _import_artifact_handler(msg: Msg) -> Reply:
     """Import and parse external artifacts into native format."""
     start_time = time.time()
     log_request(logger, msg.id, "chaperone", "import_artifact")
@@ -87,8 +90,7 @@ Extract structure, identify sections/slides/tables, and create a well-organized 
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "chaperone", e))
 
-@app.post("/export_artifact", response_model=Reply)
-async def export_artifact(msg: Msg):
+async def _export_artifact_handler(msg: Msg) -> Reply:
     """Export native artifacts to external formats (docx, xlsx, pptx, pdf)."""
     start_time = time.time()
     log_request(logger, msg.id, "chaperone", "export_artifact")
@@ -179,3 +181,39 @@ Format the content appropriately for {target_format} and provide export guidance
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "chaperone", e))
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/import_artifact", response_model=Reply)
+async def import_artifact_v1(msg: Msg):
+    """Import Artifact endpoint (API v1)."""
+    return await _import_artifact_handler(msg)
+
+@app.post("/v1/export_artifact", response_model=Reply)
+async def export_artifact_v1(msg: Msg):
+    """Export Artifact endpoint (API v1)."""
+    return await _export_artifact_handler(msg)
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/import_artifact", response_model=Reply)
+async def import_artifact_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/import_artifact instead.
+    Import Artifact endpoint.
+    """
+    logger.warning("Deprecated endpoint /import_artifact used. Please migrate to /v1/import_artifact")
+    return await _import_artifact_handler(msg)
+
+@app.post("/export_artifact", response_model=Reply)
+async def export_artifact_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export_artifact instead.
+    Export Artifact endpoint.
+    """
+    logger.warning("Deprecated endpoint /export_artifact used. Please migrate to /v1/export_artifact")
+    return await _export_artifact_handler(msg)

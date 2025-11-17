@@ -11,5 +11,6 @@
     "constraints": [
       "<=150 words"
     ]
-  }
+  },
+  "api_version": "v1"
 }

@@ -163,8 +163,7 @@ async def health():
     }
 
 
-@app.post("/plan", response_model=WorkflowPlan)
-async def create_workflow_plan(request: WorkflowRequest):
+async def _plan_handler(request: WorkflowRequest) -> WorkflowPlan:
     """
     Create an orchestration plan for multi-service workflows.
 
@@ -218,8 +217,7 @@ Respond with ONLY valid JSON."""
         raise HTTPException(status_code=500, detail=f"Planning failed: {str(e)}")
 
 
-@app.post("/execute")
-async def execute_workflow(plan: WorkflowPlan):
+async def _execute_handler(plan: WorkflowPlan):
     """
     Execute a workflow plan by orchestrating service calls.
     Moe calls the shots with enterprise-grade resilience!
@@ -421,6 +419,43 @@ async def execute_workflow(plan: WorkflowPlan):
             "circuit_breaker_timeout": settings.circuit_breaker_timeout if settings.circuit_breaker_enabled else 0
         }
     }
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/plan", response_model=WorkflowPlan)
+async def plan_v1(request: WorkflowRequest):
+    """Create an orchestration plan for multi-service workflows (API v1)."""
+    return await _plan_handler(request)
+
+@app.post("/v1/execute")
+async def execute_v1(plan: WorkflowPlan):
+    """Execute a workflow plan by orchestrating service calls (API v1)."""
+    return await _execute_handler(plan)
+
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/plan", response_model=WorkflowPlan)
+async def plan_legacy(request: WorkflowRequest):
+    """
+    DEPRECATED: Use /v1/plan instead.
+    Create an orchestration plan for multi-service workflows.
+    """
+    logger.warning("Deprecated endpoint /plan used. Please migrate to /v1/plan")
+    return await _plan_handler(request)
+
+@app.post("/execute")
+async def execute_legacy(plan: WorkflowPlan):
+    """
+    DEPRECATED: Use /v1/execute instead.
+    Execute a workflow plan by orchestrating service calls.
+    """
+    logger.warning("Deprecated endpoint /execute used. Please migrate to /v1/execute")
+    return await _execute_handler(plan)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from matrix.auth_dependencies import (
 )
 from matrix.db_models import User
 from sqlalchemy.ext.asyncio import AsyncSession
+from matrix.versioning import version_middleware, get_version_from_request
 
 # Agent URLs configuration
 AGENT_URLS = {
@@ -117,6 +118,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Mesh Gateway", lifespan=lifespan)
 setup_instrumentation(app, service_name="mesh", service_version="1.0.0")
 logger = setup_logging("mesh")
+
+# Add API versioning middleware
+app.middleware("http")(version_middleware)
 
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
@@ -214,16 +218,16 @@ async def check_rbac_authorization(
 
     return True
 
-@app.post("/{agent}/{endpoint}")
-async def route(
+async def _route_handler(
     agent: str,
     endpoint: str,
     request: Request,
-    user: Optional[User] = Depends(get_current_user_or_api_key),
-    db: AsyncSession = Depends(get_postgres_session)
+    user: Optional[User],
+    db: AsyncSession,
+    api_version: str = "v1"
 ):
     """
-    Route requests to agents with enterprise-grade resilience and RBAC.
+    Internal route handler with enterprise-grade resilience and RBAC.
 
     Features:
     - Circuit breaker: Fails fast when agent is down
@@ -231,10 +235,14 @@ async def route(
     - Bulkhead: Prevents resource exhaustion
     - Health-aware routing: Checks agent health before routing
     - RBAC: Role-based access control for all endpoints
+    - API versioning: Version-aware routing
     """
     start_time = time.time()
     data = await request.json()
     msg = Msg(**data)
+
+    # Set API version from request
+    msg.api_version = api_version
 
     log_request(logger, msg.id, agent, endpoint)
 
@@ -275,6 +283,10 @@ async def route(
                 r.raise_for_status()
                 response_data = r.json()
 
+                # Ensure response includes API version
+                if isinstance(response_data, dict) and "api_version" not in response_data:
+                    response_data["api_version"] = api_version
+
                 duration_ms = (time.time() - start_time) * 1000
                 log_response(logger, msg.id, agent, response_data.get("ok", True), duration_ms, endpoint=endpoint)
 
@@ -300,6 +312,10 @@ async def route(
             await health_router.update_health(agent, is_healthy=True)
 
         response_data = r.json()
+
+        # Ensure response includes API version
+        if isinstance(response_data, dict) and "api_version" not in response_data:
+            response_data["api_version"] = api_version
 
         duration_ms = (time.time() - start_time) * 1000
         log_response(logger, msg.id, agent, response_data.get("ok", True), duration_ms, endpoint=endpoint)
@@ -383,6 +399,61 @@ async def route(
             await health_router.update_health(agent, is_healthy=False)
 
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+# ============================================================================
+# Versioned Routes (v1)
+# ============================================================================
+
+@app.post("/v1/{agent}/{endpoint}")
+async def route_v1(
+    agent: str,
+    endpoint: str,
+    request: Request,
+    user: Optional[User] = Depends(get_current_user_or_api_key),
+    db: AsyncSession = Depends(get_postgres_session)
+):
+    """
+    Route requests to agents with API v1.
+
+    This is the current stable version of the API.
+    """
+    return await _route_handler(agent, endpoint, request, user, db, api_version="v1")
+
+# ============================================================================
+# Legacy Routes (Backward Compatibility)
+# ============================================================================
+
+@app.post("/{agent}/{endpoint}")
+async def route_legacy(
+    agent: str,
+    endpoint: str,
+    request: Request,
+    user: Optional[User] = Depends(get_current_user_or_api_key),
+    db: AsyncSession = Depends(get_postgres_session)
+):
+    """
+    Legacy route handler for backward compatibility.
+
+    DEPRECATED: This unversioned endpoint is deprecated. Please use /v1/{agent}/{endpoint}.
+    This endpoint defaults to API v1 but may be removed in future versions.
+    """
+    logger.warning(
+        f"Deprecated unversioned endpoint used: /{agent}/{endpoint}. "
+        f"Please migrate to /v1/{agent}/{endpoint}"
+    )
+
+    response = await _route_handler(agent, endpoint, request, user, db, api_version="v1")
+
+    # Add deprecation warning to response
+    if isinstance(response, dict):
+        response["_deprecation_warning"] = {
+            "message": "This unversioned endpoint is deprecated. Please use /v1/{agent}/{endpoint}",
+            "legacy_path": f"/{agent}/{endpoint}",
+            "recommended_path": f"/v1/{agent}/{endpoint}",
+            "migration_guide": "https://github.com/E-TECH-PLAYTECH/BIOwerk/blob/main/docs/API_VERSIONING.md"
+        }
+
+    return response
 
 # Health and readiness endpoints are now provided by setup_health_endpoints()
 # Legacy endpoint for backward compatibility

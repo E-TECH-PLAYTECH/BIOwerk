@@ -16,8 +16,11 @@ logger = setup_logging("synapse")
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="synapse", version="1.0.0")
 
-@app.post("/storyboard", response_model=Reply)
-async def storyboard(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _storyboard_handler(msg: Msg) -> Reply:
     """Generate a storyboard (slide outline) for a presentation."""
     start_time = time.time()
     log_request(logger, msg.id, "synapse", "storyboard")
@@ -67,8 +70,7 @@ Generate a compelling storyboard with diverse slide types."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "synapse", e))
 
-@app.post("/slide_make", response_model=Reply)
-async def slide_make(msg: Msg):
+async def _slide_make_handler(msg: Msg) -> Reply:
     """Generate actual slide content from storyboard."""
     start_time = time.time()
     log_request(logger, msg.id, "synapse", "slide_make")
@@ -135,8 +137,7 @@ Generate complete slides with content and speaker notes."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "synapse", e))
 
-@app.post("/visualize", response_model=Reply)
-async def visualize(msg: Msg):
+async def _visualize_handler(msg: Msg) -> Reply:
     """Generate data visualization specifications."""
     start_time = time.time()
     log_request(logger, msg.id, "synapse", "visualize")
@@ -199,8 +200,7 @@ Generate sample data and visualization spec."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "synapse", e))
 
-@app.post("/export", response_model=Reply)
-async def export_(msg: Msg):
+async def _export__handler(msg: Msg) -> Reply:
     """Export the complete presentation artifact."""
     start_time = time.time()
     log_request(logger, msg.id, "synapse", "export")
@@ -237,3 +237,67 @@ async def export_(msg: Msg):
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "synapse", e))
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/storyboard", response_model=Reply)
+async def storyboard_v1(msg: Msg):
+    """Storyboard endpoint (API v1)."""
+    return await _storyboard_handler(msg)
+
+@app.post("/v1/slide_make", response_model=Reply)
+async def slide_make_v1(msg: Msg):
+    """Slide Make endpoint (API v1)."""
+    return await _slide_make_handler(msg)
+
+@app.post("/v1/visualize", response_model=Reply)
+async def visualize_v1(msg: Msg):
+    """Visualize endpoint (API v1)."""
+    return await _visualize_handler(msg)
+
+@app.post("/v1/export", response_model=Reply)
+async def export__v1(msg: Msg):
+    """Export  endpoint (API v1)."""
+    return await _export__handler(msg)
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/storyboard", response_model=Reply)
+async def storyboard_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/storyboard instead.
+    Storyboard endpoint.
+    """
+    logger.warning("Deprecated endpoint /storyboard used. Please migrate to /v1/storyboard")
+    return await _storyboard_handler(msg)
+
+@app.post("/slide_make", response_model=Reply)
+async def slide_make_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/slide_make instead.
+    Slide Make endpoint.
+    """
+    logger.warning("Deprecated endpoint /slide_make used. Please migrate to /v1/slide_make")
+    return await _slide_make_handler(msg)
+
+@app.post("/visualize", response_model=Reply)
+async def visualize_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/visualize instead.
+    Visualize endpoint.
+    """
+    logger.warning("Deprecated endpoint /visualize used. Please migrate to /v1/visualize")
+    return await _visualize_handler(msg)
+
+@app.post("/export", response_model=Reply)
+async def export__legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export instead.
+    Export  endpoint.
+    """
+    logger.warning("Deprecated endpoint /export used. Please migrate to /v1/export")
+    return await _export__handler(msg)

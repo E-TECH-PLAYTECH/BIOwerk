@@ -16,8 +16,11 @@ logger = setup_logging("circadian")
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="circadian", version="1.0.0")
 
-@app.post("/plan_timeline", response_model=Reply)
-async def plan_timeline(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _plan_timeline_handler(msg: Msg) -> Reply:
     """Generate project timeline with milestones and risk assessment."""
     start_time = time.time()
     log_request(logger, msg.id, "circadian", "plan_timeline")
@@ -86,8 +89,7 @@ Generate a realistic timeline with milestones, identify potential risks, and sug
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "circadian", e))
 
-@app.post("/assign", response_model=Reply)
-async def assign(msg: Msg):
+async def _assign_handler(msg: Msg) -> Reply:
     """Make intelligent task assignments based on skills and workload."""
     start_time = time.time()
     log_request(logger, msg.id, "circadian", "assign")
@@ -157,8 +159,7 @@ Create balanced assignments considering skills, priority, and workload."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "circadian", e))
 
-@app.post("/track", response_model=Reply)
-async def track(msg: Msg):
+async def _track_handler(msg: Msg) -> Reply:
     """Track project progress and provide status assessment."""
     start_time = time.time()
     log_request(logger, msg.id, "circadian", "track")
@@ -215,8 +216,7 @@ Provide status, identify concerns, and suggest recommendations."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "circadian", e))
 
-@app.post("/remind", response_model=Reply)
-async def remind(msg: Msg):
+async def _remind_handler(msg: Msg) -> Reply:
     """Generate contextual reminders based on timeline and progress."""
     start_time = time.time()
     log_request(logger, msg.id, "circadian", "remind")
@@ -268,3 +268,67 @@ Create 3-5 specific, actionable reminders for upcoming tasks and deadlines."""
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "circadian", e))
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/plan_timeline", response_model=Reply)
+async def plan_timeline_v1(msg: Msg):
+    """Plan Timeline endpoint (API v1)."""
+    return await _plan_timeline_handler(msg)
+
+@app.post("/v1/assign", response_model=Reply)
+async def assign_v1(msg: Msg):
+    """Assign endpoint (API v1)."""
+    return await _assign_handler(msg)
+
+@app.post("/v1/track", response_model=Reply)
+async def track_v1(msg: Msg):
+    """Track endpoint (API v1)."""
+    return await _track_handler(msg)
+
+@app.post("/v1/remind", response_model=Reply)
+async def remind_v1(msg: Msg):
+    """Remind endpoint (API v1)."""
+    return await _remind_handler(msg)
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/plan_timeline", response_model=Reply)
+async def plan_timeline_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/plan_timeline instead.
+    Plan Timeline endpoint.
+    """
+    logger.warning("Deprecated endpoint /plan_timeline used. Please migrate to /v1/plan_timeline")
+    return await _plan_timeline_handler(msg)
+
+@app.post("/assign", response_model=Reply)
+async def assign_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/assign instead.
+    Assign endpoint.
+    """
+    logger.warning("Deprecated endpoint /assign used. Please migrate to /v1/assign")
+    return await _assign_handler(msg)
+
+@app.post("/track", response_model=Reply)
+async def track_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/track instead.
+    Track endpoint.
+    """
+    logger.warning("Deprecated endpoint /track used. Please migrate to /v1/track")
+    return await _track_handler(msg)
+
+@app.post("/remind", response_model=Reply)
+async def remind_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/remind instead.
+    Remind endpoint.
+    """
+    logger.warning("Deprecated endpoint /remind used. Please migrate to /v1/remind")
+    return await _remind_handler(msg)

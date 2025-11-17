@@ -16,8 +16,11 @@ logger = setup_logging("myocyte")
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="myocyte", version="1.0.0")
 
-@app.post("/ingest_table", response_model=Reply)
-async def ingest_table(msg: Msg):
+# ============================================================================
+# Internal Handler Functions
+# ============================================================================
+
+async def _ingest_table_handler(msg: Msg) -> Reply:
     """Analyze and structure table data."""
     start_time = time.time()
     log_request(logger, msg.id, "myocyte", "ingest_table")
@@ -77,8 +80,7 @@ Identify logical tables, determine appropriate headers, and structure the data."
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "myocyte", e))
 
-@app.post("/formula_eval", response_model=Reply)
-async def formula_eval(msg: Msg):
+async def _formula_eval_handler(msg: Msg) -> Reply:
     """Evaluate formulas and generate insights from tables."""
     start_time = time.time()
     log_request(logger, msg.id, "myocyte", "formula_eval")
@@ -165,8 +167,7 @@ Calculate results and suggest visualizations."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "myocyte", e))
 
-@app.post("/model_forecast", response_model=Reply)
-async def model_forecast(msg: Msg):
+async def _model_forecast_handler(msg: Msg) -> Reply:
     """Generate forecasts and predictions from data."""
     start_time = time.time()
     log_request(logger, msg.id, "myocyte", "model_forecast")
@@ -224,8 +225,7 @@ Analyze trends, patterns, and generate predictions with explanations."""
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "myocyte", e))
 
-@app.post("/export", response_model=Reply)
-async def export_(msg: Msg):
+async def _export__handler(msg: Msg) -> Reply:
     """Export the complete data artifact."""
     start_time = time.time()
     log_request(logger, msg.id, "myocyte", "export")
@@ -262,3 +262,67 @@ async def export_(msg: Msg):
         duration_ms = (time.time() - start_time) * 1000
         log_error(logger, msg.id, e, duration_ms=duration_ms)
         return Reply(**create_error_response(msg.id, "myocyte", e))
+
+
+# ============================================================================
+# API v1 Endpoints
+# ============================================================================
+
+@app.post("/v1/ingest_table", response_model=Reply)
+async def ingest_table_v1(msg: Msg):
+    """Ingest Table endpoint (API v1)."""
+    return await _ingest_table_handler(msg)
+
+@app.post("/v1/formula_eval", response_model=Reply)
+async def formula_eval_v1(msg: Msg):
+    """Formula Eval endpoint (API v1)."""
+    return await _formula_eval_handler(msg)
+
+@app.post("/v1/model_forecast", response_model=Reply)
+async def model_forecast_v1(msg: Msg):
+    """Model Forecast endpoint (API v1)."""
+    return await _model_forecast_handler(msg)
+
+@app.post("/v1/export", response_model=Reply)
+async def export__v1(msg: Msg):
+    """Export  endpoint (API v1)."""
+    return await _export__handler(msg)
+# ============================================================================
+# Legacy Endpoints (Backward Compatibility)
+# ============================================================================
+
+@app.post("/ingest_table", response_model=Reply)
+async def ingest_table_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/ingest_table instead.
+    Ingest Table endpoint.
+    """
+    logger.warning("Deprecated endpoint /ingest_table used. Please migrate to /v1/ingest_table")
+    return await _ingest_table_handler(msg)
+
+@app.post("/formula_eval", response_model=Reply)
+async def formula_eval_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/formula_eval instead.
+    Formula Eval endpoint.
+    """
+    logger.warning("Deprecated endpoint /formula_eval used. Please migrate to /v1/formula_eval")
+    return await _formula_eval_handler(msg)
+
+@app.post("/model_forecast", response_model=Reply)
+async def model_forecast_legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/model_forecast instead.
+    Model Forecast endpoint.
+    """
+    logger.warning("Deprecated endpoint /model_forecast used. Please migrate to /v1/model_forecast")
+    return await _model_forecast_handler(msg)
+
+@app.post("/export", response_model=Reply)
+async def export__legacy(msg: Msg):
+    """
+    DEPRECATED: Use /v1/export instead.
+    Export  endpoint.
+    """
+    logger.warning("Deprecated endpoint /export used. Please migrate to /v1/export")
+    return await _export__handler(msg)

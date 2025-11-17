@@ -15,6 +15,10 @@ class Msg(BaseModel):
     target: str
     intent: str
     input: Dict[str, Any] = {}
+    api_version: Optional[str] = Field(
+        default="v1",
+        description="API version for this message. Defaults to v1 for backward compatibility."
+    )
 
 class Reply(BaseModel):
     id: str
@@ -23,3 +27,7 @@ class Reply(BaseModel):
     ok: bool
     output: Dict[str, Any]
     state_hash: str
+    api_version: Optional[str] = Field(
+        default="v1",
+        description="API version used to generate this reply. Matches the request version."
+    )
