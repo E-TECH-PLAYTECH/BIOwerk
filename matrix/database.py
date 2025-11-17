@@ -37,6 +37,32 @@ def get_postgres_engine():
 
     Using smaller pools with PgBouncer prevents over-subscription and
     allows PgBouncer to efficiently multiplex connections.
+
+    HORIZONTAL SCALING CONSIDERATIONS:
+
+    When running multiple replicas of a service, each replica creates its own
+    connection pool. Total connection usage calculation:
+
+    Example with 3 mesh instances and PgBouncer:
+    - Per instance pool: 5 + 5 overflow = 10 max connections
+    - 3 instances × 10 connections = 30 total connections to PgBouncer
+    - PgBouncer pool (default 100) handles these efficiently
+
+    Example with 3 mesh instances without PgBouncer:
+    - Per instance pool: 10 + 20 overflow = 30 max connections
+    - 3 instances × 30 connections = 90 total connections to PostgreSQL
+    - PostgreSQL max_connections should be configured accordingly (e.g., 200+)
+
+    **IMPORTANT**: When scaling horizontally:
+    1. Always use PgBouncer in production to prevent connection exhaustion
+    2. Configure PgBouncer pool size based on: (replicas × pool_size) + buffer
+    3. Monitor connection usage with pg_stat_activity
+    4. Set appropriate pool_size based on workload characteristics
+
+    For services that scale to 10+ replicas:
+    - Reduce pool_size to 3 + 3 overflow (6 max per instance)
+    - This gives 60 connections for 10 instances (well within PgBouncer limits)
+    - PgBouncer efficiently multiplexes to PostgreSQL backend pool
     """
     global _pg_engine
     if _pg_engine is None:
