@@ -1,6 +1,27 @@
-# BIOwerk Security Scripts
+# BIOwerk Operations & Security Scripts
 
-This directory contains security-related scripts for certificate management, vulnerability scanning, and security automation.
+This directory contains production-oriented scripts for installation, day-two operations, certificate management, vulnerability scanning, and security automation.
+
+## Unified Control (`biowerkctl.sh`)
+
+Orchestrate installation and operations from a single entry point:
+
+```bash
+# View commands
+./biowerkctl.sh help
+
+# Create or refresh the virtual environment
+./biowerkctl.sh install --dev --force-venv
+
+# Start/stop the dockerized stack
+./biowerkctl.sh docker-up
+./biowerkctl.sh docker-down
+
+# Health checks
+./biowerkctl.sh health-check
+```
+
+See the [Installation and Operations guide](../docs/INSTALLATION_AND_OPERATIONS.md) for full coverage.
 
 ## Available Scripts
 
