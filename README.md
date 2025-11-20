@@ -34,6 +34,8 @@ curl -X POST http://localhost:8080/v1/osteon/draft -H 'Content-Type: application
 
 Need ongoing service insight? See [Operations](#operations) for observability and continuity guidance.
 
+Looking for one command to get set up? Use the unified control script documented in [Installation and Operations](docs/INSTALLATION_AND_OPERATIONS.md).
+
 ## Installation Options
 
 BIOwerk offers multiple installation methods to suit different use cases:
