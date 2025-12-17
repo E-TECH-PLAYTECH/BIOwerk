@@ -7,7 +7,7 @@ It can be run as a standalone microservice or integrated into the mesh gateway.
 Usage:
     uvicorn auth_service:app --host 0.0.0.0 --port 8100
 """
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,8 +17,8 @@ from datetime import datetime, timedelta
 from matrix.database import get_postgres_session, init_databases
 from matrix.db_models import User, APIKey
 from matrix.user_repository import UserRepository, APIKeyRepository
+from matrix.token_repository import RefreshTokenRepository
 from matrix.auth import (
-    hash_password,
     verify_password,
     create_access_token,
     create_refresh_token,
@@ -28,11 +28,13 @@ from matrix.auth import (
 from matrix.auth_dependencies import get_current_active_user, require_admin
 from matrix.observability import setup_instrumentation
 from matrix.logging_config import setup_logging
+from matrix.audit import AuditLogger, AuditContext, EventStatus
 
 # Initialize app
 app = FastAPI(title="BIOwerk Auth Service", version="1.0.0")
 setup_instrumentation(app)
 logger = setup_logging("auth_service")
+audit_logger = AuditLogger()
 
 
 # ============================================================================
@@ -155,6 +157,7 @@ async def register(
 
 @app.post("/login", response_model=LoginResponse)
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_postgres_session)
 ):
@@ -195,7 +198,12 @@ async def login(
 
     # Create tokens
     access_token = create_access_token(data={"sub": user.id})
-    refresh_token = create_refresh_token(data={"sub": user.id})
+    refresh_token, _ = await create_refresh_token(
+        data={"sub": user.id},
+        db=db,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+    )
 
     logger.info(f"User logged in: {user.email} (ID: {user.id})")
 
@@ -209,45 +217,129 @@ async def login(
 
 @app.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: RefreshTokenRequest,
+    refresh_request: RefreshTokenRequest,
+    request: Request,
     db: AsyncSession = Depends(get_postgres_session)
 ):
     """
     Refresh access token using refresh token.
 
+    Each successful refresh rotates the refresh token (single use) and logs the
+    outcome for auditability.
+
     - **refresh_token**: Valid refresh token
     """
-    payload = decode_token(request.refresh_token)
+    context = AuditContext.from_request(request, service_name="auth")
+    token_repo = RefreshTokenRepository(db)
+    user_repo = UserRepository(db)
+
+    async def log_refresh_failure(reason: str):
+        await audit_logger.log_authentication(
+            action="refresh_token",
+            status=EventStatus.failure,
+            context=context,
+            authentication_method="refresh_token",
+            error_message=reason,
+            session=db,
+        )
+
+    payload = decode_token(refresh_request.refresh_token)
 
     if not payload or payload.get("type") != "refresh":
+        await log_refresh_failure("Invalid refresh token payload or type")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
 
     user_id = payload.get("sub")
-    if not user_id:
+    jti = payload.get("jti")
+    context.user_id = user_id
+
+    if not user_id or not jti:
+        await log_refresh_failure("Refresh token missing subject or jti")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload"
         )
 
+    token_record = await token_repo.get_by_jti(jti)
+    if not token_record:
+        await log_refresh_failure("Refresh token record not found or already cleared")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    if token_record.user_id != user_id:
+        await token_repo.revoke_by_jti(jti, reason="subject_mismatch")
+        await log_refresh_failure("Refresh token subject mismatch")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+
+    if token_record.revoked_at:
+        await log_refresh_failure("Refresh token revoked")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked"
+        )
+
+    if token_record.rotated_at:
+        await log_refresh_failure("Refresh token already rotated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token already used"
+        )
+
+    now = datetime.utcnow()
+    if token_record.expires_at <= now:
+        await token_repo.revoke_by_jti(jti, reason="expired")
+        await log_refresh_failure("Refresh token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token expired"
+        )
+
     # Verify user still exists and is active
-    repo = UserRepository(db)
-    user = await repo.get_user_by_id(user_id)
+    user = await user_repo.get_user_by_id(user_id)
 
     if not user or not user.is_active:
+        await token_repo.revoke_tokens_for_user(user_id, reason="user_inactive")
+        await log_refresh_failure("User not found or inactive")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive"
         )
 
-    # Create new access token
+    context.user_id = user.id
+    context.username = user.username
+
+    new_jti = RefreshTokenRepository.generate_jti()
+    await token_repo.mark_rotated(token_record, replaced_by_jti=new_jti, revoke=True, commit=False)
+
+    new_refresh_token, _ = await create_refresh_token(
+        data={"sub": user.id},
+        db=db,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=request.client.host if request.client else None,
+        jti=new_jti,
+    )
+
     access_token = create_access_token(data={"sub": user.id})
+
+    await audit_logger.log_authentication(
+        action="refresh_token",
+        status=EventStatus.success,
+        context=context,
+        authentication_method="refresh_token",
+        session=db,
+    )
 
     logger.info(f"Token refreshed for user: {user.email}")
 
-    return TokenResponse(access_token=access_token, token_type="bearer").dict()
+    return TokenResponse(access_token=access_token, refresh_token=new_refresh_token, token_type="bearer").dict()
 
 
 # ============================================================================
