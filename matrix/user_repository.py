@@ -5,7 +5,12 @@ from typing import Optional, List
 from datetime import datetime
 
 from .db_models import User, APIKey
-from .auth import hash_password, hash_api_key, generate_api_key
+from .auth import (
+    hash_password,
+    hash_api_key,
+    generate_api_key,
+    derive_api_key_identifier,
+)
 
 
 class UserRepository:
@@ -116,7 +121,9 @@ class APIKeyRepository:
         user_id: str,
         name: str,
         scopes: Optional[List[str]] = None,
-        expires_at: Optional[datetime] = None
+        expires_at: Optional[datetime] = None,
+        plain_key: Optional[str] = None,
+        key_identifier: Optional[str] = None,
     ) -> tuple[APIKey, str]:
         """
         Create a new API key.
@@ -126,17 +133,22 @@ class APIKeyRepository:
             name: Friendly name for the key
             scopes: List of allowed scopes
             expires_at: Expiration datetime
+            plain_key: Optionally provide a pre-generated API key (used for
+                deterministic identifiers)
+            key_identifier: Optional precomputed identifier for the key
 
         Returns:
             Tuple of (APIKey object, plain API key string)
             Note: Plain key is only returned once and should be shown to user
         """
-        plain_key = generate_api_key()
+        plain_key = plain_key or generate_api_key()
         hashed_key = hash_api_key(plain_key)
+        identifier = key_identifier or derive_api_key_identifier(plain_key)
 
         api_key = APIKey(
             user_id=user_id,
             key_hash=hashed_key,
+            key_identifier=identifier,
             name=name,
             scopes=scopes,
             expires_at=expires_at,

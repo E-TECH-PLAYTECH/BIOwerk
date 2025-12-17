@@ -128,12 +128,19 @@ class APIKey(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     key_hash = Column(String(255), nullable=False, unique=True, index=True)  # Hashed API key
+    key_identifier = Column(String(128), nullable=True)  # HMAC digest/prefix for indexed lookups
     name = Column(String(255), nullable=False)  # Friendly name for the key
     scopes = Column(JSON, nullable=True)  # List of allowed scopes/permissions
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("idx_api_keys_identifier", "key_identifier", unique=True),
+        Index("idx_api_keys_expiry", "expires_at"),
+        Index("idx_api_keys_active_expiry", "is_active", "expires_at"),
+    )
 
     def __repr__(self):
         return f"<APIKey(id={self.id}, name={self.name}, user_id={self.user_id})>"

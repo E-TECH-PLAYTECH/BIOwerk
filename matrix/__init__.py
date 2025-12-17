@@ -26,6 +26,7 @@ try:
         generate_api_key,
         hash_api_key,
         verify_api_key,
+        derive_api_key_identifier,
     )
     from .auth_dependencies import (  # noqa: F401
         get_current_user,
