@@ -139,6 +139,34 @@ class APIKey(Base):
         return f"<APIKey(id={self.id}, name={self.name}, user_id={self.user_id})>"
 
 
+class RefreshToken(Base):
+    """Refresh token tracking with rotation and revocation metadata."""
+    __tablename__ = "refresh_tokens"
+
+    jti = Column(String(36), primary_key=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    issued_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    rotated_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    revoked_reason = Column(String(255), nullable=True)
+    replaced_by_jti = Column(String(36), nullable=True, index=True)
+    user_agent = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True, index=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_refresh_token_user_active", "user_id", "revoked_at", "rotated_at"),
+    )
+
+    def __repr__(self):
+        return f"<RefreshToken(jti={self.jti}, user_id={self.user_id}, revoked_at={self.revoked_at}, rotated_at={self.rotated_at})>"
+
+
 class AuditLog(Base):
     """
     Enterprise audit log model with encryption at rest for sensitive data.
