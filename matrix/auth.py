@@ -7,7 +7,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from .config import settings
+from .token_repository import RefreshTokenRepository
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -71,21 +74,53 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     return encoded_jwt
 
 
-def create_refresh_token(data: Dict[str, Any]) -> str:
+async def create_refresh_token(
+    data: Dict[str, Any],
+    db: AsyncSession,
+    user_agent: Optional[str] = None,
+    ip_address: Optional[str] = None,
+    jti: Optional[str] = None,
+) -> Tuple[str, str]:
     """
-    Create a JWT refresh token with longer expiration.
+    Create a JWT refresh token with longer expiration and persist its metadata.
 
     Args:
         data: Data to encode in the token
+        db: Database session for persisting the refresh token metadata
+        user_agent: Optional user agent string to capture token provenance
+        ip_address: Optional IP address for token provenance
+        jti: Optional pre-generated JWT ID to embed; generated if omitted
 
     Returns:
-        Encoded JWT refresh token
+        Tuple of (encoded JWT refresh token, jti)
     """
+    if "sub" not in data or not data.get("sub"):
+        raise ValueError("Refresh tokens must include a subject (`sub`) claim.")
+
     to_encode = data.copy()
+    jti = to_encode.get("jti") or jti or RefreshTokenRepository.generate_jti()
     expire = datetime.utcnow() + timedelta(days=settings.jwt_refresh_token_expire_days)
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh"})
+    to_encode.update(
+        {
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "type": "refresh",
+            "jti": jti,
+        }
+    )
     encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
-    return encoded_jwt
+
+    token_repo = RefreshTokenRepository(db)
+    await token_repo.create_token(
+        user_id=to_encode["sub"],
+        jti=jti,
+        expires_at=expire,
+        user_agent=user_agent,
+        ip_address=ip_address,
+        commit=True,
+    )
+
+    return encoded_jwt, jti
 
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
