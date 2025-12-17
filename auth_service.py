@@ -23,7 +23,9 @@ from matrix.auth import (
     create_access_token,
     create_refresh_token,
     decode_token,
-    TokenResponse
+    TokenResponse,
+    derive_api_key_identifier,
+    generate_api_key
 )
 from matrix.auth_dependencies import get_current_active_user, require_admin
 from matrix.observability import setup_instrumentation
@@ -395,11 +397,16 @@ async def create_api_key(
     if key_data.expires_in_days:
         expires_at = datetime.utcnow() + timedelta(days=key_data.expires_in_days)
 
+    raw_api_key = generate_api_key()
+    key_identifier = derive_api_key_identifier(raw_api_key)
+
     api_key, plain_key = await repo.create_api_key(
         user_id=current_user.id,
         name=key_data.name,
         scopes=key_data.scopes,
-        expires_at=expires_at
+        expires_at=expires_at,
+        plain_key=raw_api_key,
+        key_identifier=key_identifier
     )
 
     logger.info(f"API key created: {api_key.name} (ID: {api_key.id}) for user {current_user.email}")

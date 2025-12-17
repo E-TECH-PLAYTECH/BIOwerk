@@ -1,14 +1,15 @@
 """FastAPI dependencies for authentication and authorization."""
+from datetime import datetime
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from typing import Optional
 import logging
 
 from .database import get_postgres_session
 from .db_models import User, APIKey
-from .auth import decode_token, verify_api_key
+from .auth import decode_token, verify_api_key, derive_api_key_identifier
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,52 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 # API Key Authentication
 # ============================================================================
 
+
+async def _fetch_api_key_candidate(api_key: str, db: AsyncSession) -> Optional[APIKey]:
+    """Fetch a single API key candidate by identifier with expiry enforcement."""
+    identifier = derive_api_key_identifier(api_key)
+    now = datetime.utcnow()
+
+    stmt = select(APIKey).where(
+        APIKey.key_identifier == identifier,
+        APIKey.is_active == True,  # noqa: E712
+        or_(APIKey.expires_at.is_(None), APIKey.expires_at > now),
+    )
+    result = await db.execute(stmt)
+    candidate = result.scalar_one_or_none()
+    if candidate:
+        return candidate
+
+    expired_stmt = select(APIKey.expires_at).where(
+        APIKey.key_identifier == identifier,
+        APIKey.is_active == True,  # noqa: E712
+        APIKey.expires_at.isnot(None),
+        APIKey.expires_at <= now,
+    )
+    expired_result = await db.execute(expired_stmt)
+    if expired_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key expired",
+        )
+
+    return None
+
+
+async def _get_valid_api_key(api_key: str, db: AsyncSession) -> Optional[APIKey]:
+    """Resolve and verify a single API key record."""
+    candidate = await _fetch_api_key_candidate(api_key, db)
+    if not candidate:
+        return None
+
+    if not verify_api_key(api_key, candidate.key_hash):
+        return None
+
+    candidate.last_used_at = datetime.utcnow()
+    await db.commit()
+    return candidate
+
+
 async def get_user_from_api_key(
     api_key: Optional[str] = Header(None, alias=None),  # Will be set dynamically
     db: AsyncSession = Depends(get_postgres_session)
@@ -129,25 +176,20 @@ async def get_user_from_api_key(
     if not api_key:
         return None
 
-    # Find API key in database
-    stmt = select(APIKey).where(APIKey.is_active == True)  # noqa: E712
+    try:
+        db_api_key = await _get_valid_api_key(api_key, db)
+    except HTTPException:
+        raise
+
+    if not db_api_key:
+        return None
+
+    stmt = select(User).where(User.id == db_api_key.user_id)
     result = await db.execute(stmt)
-    api_keys = result.scalars().all()
+    user = result.scalar_one_or_none()
 
-    for db_api_key in api_keys:
-        if verify_api_key(api_key, db_api_key.key_hash):
-            # Update last_used_at
-            from datetime import datetime
-            db_api_key.last_used_at = datetime.utcnow()
-            await db.commit()
-
-            # Fetch user
-            stmt = select(User).where(User.id == db_api_key.user_id)
-            result = await db.execute(stmt)
-            user = result.scalar_one_or_none()
-
-            if user and user.is_active:
-                return user
+    if user and user.is_active:
+        return user
 
     return None
 
@@ -509,28 +551,30 @@ def require_scopes(*required_scopes: str):
                 detail="API key required"
             )
 
-        # Find API key
-        stmt = select(APIKey).where(APIKey.is_active == True)  # noqa: E712
+        try:
+            db_api_key = await _get_valid_api_key(x_api_key, db)
+        except HTTPException:
+            raise
+
+        if not db_api_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key"
+            )
+
+        key_scopes = db_api_key.scopes or []
+        if not all(scope in key_scopes for scope in required_scopes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required scopes: {required_scopes}"
+            )
+
+        stmt = select(User).where(User.id == db_api_key.user_id)
         result = await db.execute(stmt)
-        api_keys = result.scalars().all()
+        user = result.scalar_one_or_none()
 
-        for db_api_key in api_keys:
-            if verify_api_key(x_api_key, db_api_key.key_hash):
-                # Check scopes
-                key_scopes = db_api_key.scopes or []
-                if not all(scope in key_scopes for scope in required_scopes):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Missing required scopes: {required_scopes}"
-                    )
-
-                # Fetch user
-                stmt = select(User).where(User.id == db_api_key.user_id)
-                result = await db.execute(stmt)
-                user = result.scalar_one_or_none()
-
-                if user and user.is_active:
-                    return user
+        if user and user.is_active:
+            return user
 
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

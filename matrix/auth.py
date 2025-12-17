@@ -1,6 +1,8 @@
 """Authentication utilities for JWT tokens and password hashing."""
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
+import hashlib
+import hmac
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import secrets
@@ -193,6 +195,23 @@ def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
         True if API key matches, False otherwise
     """
     return pwd_context.verify(plain_api_key, hashed_api_key)
+
+
+def derive_api_key_identifier(api_key: str) -> str:
+    """
+    Derive a stable, non-reversible identifier for an API key.
+
+    This uses an HMAC-SHA256 digest keyed by the JWT secret to avoid leaking
+    raw key material while still enabling indexed lookups.
+
+    Args:
+        api_key: Plain API key
+
+    Returns:
+        Hex-encoded identifier suitable for indexed storage
+    """
+    secret = settings.jwt_secret_key.encode()
+    return hmac.new(secret, api_key.encode(), hashlib.sha256).hexdigest()
 
 
 # ============================================================================
