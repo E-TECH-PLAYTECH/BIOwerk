@@ -1,7 +1,30 @@
 """Configuration management using Pydantic Settings."""
-from pydantic_settings import BaseSettings
-from pydantic import Field
+import logging
 from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+
+DEFAULT_JWT_SECRET = "dev-secret-key-change-in-production"
+DEFAULT_ENCRYPTION_MASTER_KEY = "change-this-master-key-in-production-min-32-chars-required"
+
+_logger = logging.getLogger(__name__)
+_dev_secret_warnings_emitted: set[str] = set()
+
+
+def _emit_dev_secret_warning(secret_name: str) -> None:
+    """Log a single warning per default secret when running in development."""
+
+    if secret_name in _dev_secret_warnings_emitted:
+        return
+
+    _dev_secret_warnings_emitted.add(secret_name)
+    _logger.warning(
+        "Running with default %s in development. Set %s to a strong value before shipping to staging/production.",
+        secret_name,
+        secret_name.upper(),
+    )
 
 
 class Settings(BaseSettings):
@@ -225,6 +248,30 @@ class Settings(BaseSettings):
 
     # Admin Override
     budget_admin_bypass: bool = Field(default=True, description="Allow admins to bypass budgets")
+
+    def model_post_init(self, __context: Optional[dict]) -> None:  # noqa: D401
+        """Run security validations after settings load."""
+
+        env = (self.environment or "development").strip().lower()
+        defaulted_secrets = []
+
+        if self.jwt_secret_key == DEFAULT_JWT_SECRET:
+            defaulted_secrets.append("jwt_secret_key")
+
+        if self.encryption_master_key == DEFAULT_ENCRYPTION_MASTER_KEY:
+            defaulted_secrets.append("encryption_master_key")
+
+        if env != "development" and defaulted_secrets:
+            secret_list = ", ".join(defaulted_secrets)
+            raise ValueError(
+                "Security configuration invalid: default secrets detected in the "
+                f"{self.environment!r} environment ({secret_list}). "
+                "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, environment-specific values."
+            )
+
+        if env == "development" and defaulted_secrets:
+            for secret in defaulted_secrets:
+                _emit_dev_secret_warning(secret)
 
     class Config:
         env_file = ".env"
