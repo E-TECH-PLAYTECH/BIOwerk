@@ -26,6 +26,7 @@ BIOwerk ships development-only defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MAS
   kubectl create secret generic gdpr-secrets --from-literal=encryption_master_key=$(openssl rand -hex 64) -n <namespace>
   helm upgrade --install biowerk ./helm/biowerk -n <namespace>
   ```
+  The Helm chart maps `.Values.environment` to the `ENVIRONMENT` setting (default: `production`) and reads the secrets above as mounted environment variables; avoid embedding secrets directly in `values.yaml`.
   For sealed secrets or external secret stores, map the same keys (`jwt_secret_key`, `encryption_master_key`) into the environment of the services.
 
 ## Unified Control Script
