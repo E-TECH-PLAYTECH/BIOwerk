@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
-from typing import Optional
+from typing import Optional, List
 import logging
 
 from .database import get_postgres_session
@@ -125,9 +125,9 @@ async def _fetch_api_key_candidates(api_key: str, db: AsyncSession) -> List[APIK
         or_(APIKey.expires_at.is_(None), APIKey.expires_at > now),
     )
     candidate_result = await db.execute(candidate_stmt)
-    candidate = candidate_result.scalar_one_or_none()
-    if candidate:
-        return candidate
+    candidates = list(candidate_result.scalars().all())
+    if candidates:
+        return candidates
 
     expired_stmt = select(APIKey.expires_at).where(
         APIKey.key_identifier == identifier,

@@ -140,6 +140,7 @@ class APIKey(Base):
         Index("idx_api_keys_identifier", "key_identifier"),
         Index("idx_api_keys_expiry", "expires_at"),
         Index("idx_api_keys_active_expiry", "is_active", "expires_at"),
+        Index("idx_api_keys_identifier_active_expiry", "key_identifier", "is_active", "expires_at"),
     )
 
     def __repr__(self):
