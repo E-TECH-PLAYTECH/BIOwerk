@@ -75,6 +75,19 @@ class RefreshTokenRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_active_for_user(self, jti: str, user_id: str) -> Optional[RefreshToken]:
+        """Fetch an active refresh token scoped to a specific user."""
+        now = datetime.utcnow()
+        stmt = select(RefreshToken).where(
+            RefreshToken.jti == jti,
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.rotated_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def revoke_by_jti(self, jti: str, reason: Optional[str] = None) -> bool:
         """Revoke a refresh token by JTI if it is not already revoked."""
         now = datetime.utcnow()
