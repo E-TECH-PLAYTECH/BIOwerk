@@ -252,27 +252,24 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: Optional[dict]) -> None:  # noqa: D401
         """Run security validations after settings load."""
 
-        env = (self.environment or "development").strip().lower()
-        env_requires_strong_secrets = env in {"staging", "production"}
-        defaulted_secrets = []
-
-        if self.jwt_secret_key == DEFAULT_JWT_SECRET:
-            defaulted_secrets.append("jwt_secret_key")
-
-        if self.encryption_master_key == DEFAULT_ENCRYPTION_MASTER_KEY:
-            defaulted_secrets.append("encryption_master_key")
-
+        normalized_env = (self.environment or "development").strip().lower()
         production_like_envs = {"production", "staging"}
+        defaults = {
+            "jwt_secret_key": (self.jwt_secret_key, DEFAULT_JWT_SECRET),
+            "encryption_master_key": (self.encryption_master_key, DEFAULT_ENCRYPTION_MASTER_KEY),
+        }
 
-        if env in production_like_envs and defaulted_secrets:
+        defaulted_secrets = [name for name, (value, default) in defaults.items() if value == default]
+
+        if normalized_env in production_like_envs and defaulted_secrets:
             secret_list = ", ".join(defaulted_secrets)
             raise ValueError(
                 "Security configuration invalid: shipped defaults detected in the "
                 f"{self.environment!r} environment ({secret_list}). "
-                "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, environment-specific values before deploying."
+                "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, per-environment secrets before deploying."
             )
 
-        if env == "development" and defaulted_secrets:
+        if normalized_env == "development" and defaulted_secrets:
             for secret in defaulted_secrets:
                 _emit_dev_secret_warning(secret)
 
