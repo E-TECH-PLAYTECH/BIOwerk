@@ -145,6 +145,9 @@ class APIKeyRepository:
         hashed_key = hash_api_key(plain_key)
         identifier = key_identifier or derive_api_key_identifier(plain_key)
 
+        if not identifier:
+            raise ValueError("API key identifier must be provided for creation.")
+
         api_key = APIKey(
             user_id=user_id,
             key_hash=hashed_key,
