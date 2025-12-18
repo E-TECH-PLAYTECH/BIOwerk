@@ -185,6 +185,7 @@ python scripts/security_scan.py --deps-only
   kubectl create secret generic gdpr-secrets --from-literal=encryption_master_key=$(openssl rand -hex 64) -n <namespace>
   helm upgrade --install biowerk ./helm/biowerk -n <namespace>
   ```
+  The chart respects `.Values.environment` (defaults to `production`) for `ENVIRONMENT` and mounts the secrets above into the pods; keep the secrets out of `values.yaml` and rotate them per environment.
 
 ### 📊 Security Monitoring
 - **Prometheus metrics** for rate limits and auth events
