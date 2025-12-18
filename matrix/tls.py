@@ -20,7 +20,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.x509.oid import ExtensionOID
+from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,12 @@ CA-issued certificate operational checklist:
   `openssl s_client -connect host:port -servername <dns> -showcerts`.
 - Revocation hygiene: Enable OCSP stapling where supported and ensure CRL/OCSP URLs in the
   certificate are reachable from the host. Maintain scheduled jobs (or load balancer settings) to
-  refresh OCSP responses and rotate certificates ahead of expiry.
+  refresh OCSP responses and rotate certificates ahead of expiry. If your load balancer terminates
+  TLS, confirm OCSP stapling is enabled and that CRL distribution endpoints are reachable during
+  health checks.
 - Monitoring: Track expiry, OCSP freshness, and handshake errors in observability dashboards with
-  environment labels (development/staging/production) for rapid triage.
+  environment labels (development/staging/production) for rapid triage. Alert when certs fall back
+  to weak cipher bundles or below the mandated minimum TLS version.
 """
 
 
@@ -133,6 +136,47 @@ class TLSConfig:
 
         return errors, san_entries
 
+    @staticmethod
+    def _validate_hostname_coverage(
+        expected_hostnames: Optional[list[str]],
+        san_entries: list[str],
+    ) -> list[str]:
+        if not expected_hostnames:
+            return []
+
+        sanitized_expected = {host.strip().lower() for host in expected_hostnames if host and host.strip()}
+        if not sanitized_expected:
+            return []
+
+        san_lower = {san.lower() for san in san_entries}
+        missing = [host for host in sanitized_expected if host not in san_lower]
+        if missing:
+            return [f"Certificate SAN does not cover expected hostnames: {', '.join(sorted(missing))}"]
+        return []
+
+    @staticmethod
+    def _extract_revocation_metadata(cert: x509.Certificate) -> tuple[list[str], list[str]]:
+        ocsp_urls: list[str] = []
+        crl_urls: list[str] = []
+
+        try:
+            aia = cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_INFORMATION_ACCESS).value
+            for access_description in aia:
+                if access_description.access_method == AuthorityInformationAccessOID.OCSP:
+                    ocsp_urls.append(access_description.access_location.value)
+        except x509.ExtensionNotFound:
+            pass
+
+        try:
+            crl_dist_points = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value
+            for point in crl_dist_points:
+                if point.full_name:
+                    crl_urls.extend([name.value for name in point.full_name])
+        except x509.ExtensionNotFound:
+            pass
+
+        return ocsp_urls, crl_urls
+
     @classmethod
     def _validate_private_key_strength(cls, private_key) -> list[str]:
         errors: list[str] = []
@@ -176,8 +220,11 @@ class TLSConfig:
         metadata: dict,
         key_errors: list[str],
         cert_errors: list[str],
+        hostname_errors: list[str],
         ciphers: Optional[str],
         min_version: Optional[str],
+        expect_ocsp: bool,
+        expect_crl: bool,
     ) -> None:
         is_prod_like = environment in cls.PRODUCTION_ENVIRONMENTS
 
@@ -198,6 +245,20 @@ class TLSConfig:
             enforced_errors.append("Self-signed certificates are not permitted in staging/production.")
         enforced_errors.extend(key_errors)
         enforced_errors.extend(cert_errors)
+        enforced_errors.extend(hostname_errors)
+
+        if expect_ocsp and not metadata.get("ocsp_urls"):
+            message = "OCSP stapling/endpoint is expected but certificate does not advertise an OCSP URL."
+            if is_prod_like:
+                enforced_errors.append(message)
+            else:
+                logger.warning(message)
+        if expect_crl and not metadata.get("crl_urls"):
+            message = "CRL distribution points expected but certificate is missing CRL URLs."
+            if is_prod_like:
+                enforced_errors.append(message)
+            else:
+                logger.warning(message)
 
         if is_prod_like and enforced_errors:
             raise ValueError(
@@ -215,8 +276,10 @@ class TLSConfig:
         verify_client: bool = False,
         min_version: str = "TLSv1.2",
         ciphers: Optional[str] = None,
+        environment: Optional[str] = None,
         expected_hostnames: Optional[list[str]] = None,
-        environment: str = os.getenv("ENVIRONMENT", "development"),
+        expect_ocsp_stapling: bool = False,
+        expect_crl_distribution: bool = False,
     ) -> ssl.SSLContext:
         """
         Create a secure SSL context for HTTPS servers.
@@ -228,8 +291,10 @@ class TLSConfig:
             verify_client: Require and verify client certificates (mTLS)
             min_version: Minimum TLS version ("TLSv1.2" or "TLSv1.3")
             ciphers: Custom cipher suite (None = use secure defaults)
-            expected_hostnames: Hostnames/IPs that must appear in the certificate SAN
-            environment: Deployment environment (development, staging, production)
+            environment: Deployment environment driving validation strictness
+            expected_hostnames: Hostnames that must be present in the certificate SAN set
+            expect_ocsp_stapling: Whether the deployment expects OCSP stapling/URLs to be present
+            expect_crl_distribution: Whether CRL distribution points are required on the certificate
 
         Returns:
             Configured SSL context
@@ -258,23 +323,42 @@ class TLSConfig:
             if not ca_path.exists():
                 raise FileNotFoundError(f"CA certificate file not found: {ca_file}")
 
-        # Validate certificate metadata up front
-        metadata = cls.validate_certificate(
-            cert_file=str(cert_path),
-            expected_hostnames=expected_hostnames or [socket.getfqdn(), socket.gethostname()],
+        normalized_env = cls._normalize_environment(environment)
+
+        cert = cls._load_certificate(cert_path)
+        metadata = cls.validate_certificate(cert_file, cert=cert)
+        cert_strength_errors = list(metadata.get("strength_errors", []))
+        private_key = cls._load_private_key(key_path)
+        key_strength_errors = cls._validate_private_key_strength(private_key)
+        hostname_errors = cls._validate_hostname_coverage(expected_hostnames, metadata.get("san_entries", []))
+        key_cert_error = cls._validate_key_certificate_pair(private_key, cert)
+        if key_cert_error:
+            key_strength_errors.append(key_cert_error)
+            if normalized_env not in cls.PRODUCTION_ENVIRONMENTS:
+                logger.error("TLS private key and certificate mismatch detected: %s", key_cert_error)
+
+        cls._enforce_environmental_tls_policy(
             environment=normalized_env,
+            metadata=metadata,
+            key_errors=key_strength_errors,
+            cert_errors=cert_strength_errors,
+            hostname_errors=hostname_errors,
+            ciphers=ciphers,
+            min_version=min_version,
+            expect_ocsp=expect_ocsp_stapling,
+            expect_crl=expect_crl_distribution,
         )
 
-        if normalized_env == "production" and metadata.get("is_self_signed", False):
-            raise ValueError(
-                "Self-signed certificates are not permitted in production. "
-                "Provision a CA-signed certificate."
-            )
-
-        if normalized_env == "production" and ciphers is None:
-            raise ValueError(
-                "Explicit cipher suites are required in production. "
-                "Pass TLSConfig.SECURE_CIPHERS or a hardened cipher list."
+        if key_strength_errors or cert_strength_errors or hostname_errors or metadata.get("is_self_signed"):
+            logger.warning(
+                "TLS material validation warnings detected (%s environment): %s",
+                normalized_env,
+                "; ".join(
+                    key_strength_errors
+                    + cert_strength_errors
+                    + hostname_errors
+                    + (["certificate is self-signed"] if metadata.get("is_self_signed") else [])
+                ),
             )
 
         # Create SSL context with secure defaults
@@ -405,6 +489,8 @@ class TLSConfig:
         issuer = cert.issuer.rfc4514_string()
         not_before = cert.not_valid_before_utc
         not_after = cert.not_valid_after_utc
+        cert_strength_errors, san_entries = cls._validate_certificate_strength(cert)
+        ocsp_urls, crl_urls = cls._extract_revocation_metadata(cert)
         common_name_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
         common_name = common_name_attrs[0].value if common_name_attrs else ""
         common_name_value = common_name.lower() if common_name else ""
@@ -490,6 +576,9 @@ class TLSConfig:
             "days_remaining": days_remaining,
             "is_expired": is_expired,
             "is_self_signed": is_self_signed,
+            "san_entries": san_entries,
+            "signature_hash": cert.signature_hash_algorithm.name if cert.signature_hash_algorithm else "unknown",
+            "strength_errors": cert_strength_errors,
             "key_type": key_type,
             "key_size": key_size,
             "san_dns": san_dns_values,
