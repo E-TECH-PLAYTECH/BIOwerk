@@ -433,6 +433,9 @@ class AuditLogger:
         authentication_method: str,
         error_message: Optional[str] = None,
         session: Optional[AsyncSession] = None,
+        resource_type: Optional[str] = None,
+        resource_id: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """Log an authentication event (login, logout, token refresh, etc.)."""
         return await self.log(
@@ -444,7 +447,10 @@ class AuditLogger:
             context=context,
             authentication_method=authentication_method,
             error_message=error_message,
+            resource_type=resource_type,
+            resource_id=resource_id,
             session=session,
+            **kwargs,
         )
 
     async def log_access(

@@ -7,7 +7,7 @@ It can be run as a standalone microservice or integrated into the mesh gateway.
 Usage:
     uvicorn auth_service:app --host 0.0.0.0 --port 8100
 """
-from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi import Body, FastAPI, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,7 @@ from matrix.auth import (
     decode_token,
     TokenResponse,
     derive_api_key_identifier,
-    generate_api_key
+    generate_api_key,
 )
 from matrix.auth_dependencies import get_current_active_user, require_admin
 from matrix.observability import setup_instrumentation
@@ -75,6 +75,19 @@ class LoginResponse(BaseModel):
 class RefreshTokenRequest(BaseModel):
     """Refresh token request."""
     refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    """Logout request that optionally carries the refresh token being invalidated."""
+
+    refresh_token: Optional[str] = None
+
+
+class PasswordChangeRequest(BaseModel):
+    """Password change request for authenticated users."""
+
+    current_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=8)
 
 
 class APIKeyCreate(BaseModel):
@@ -217,6 +230,153 @@ async def login(
     )
 
 
+@app.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    request: Request,
+    logout_request: LogoutRequest = Body(default_factory=LogoutRequest),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_postgres_session),
+):
+    """
+    Logout the current user and revoke all of their refresh tokens.
+
+    - **refresh_token**: Optional refresh token to explicitly revoke alongside the blanket revocation.
+    """
+    context = AuditContext.from_request(request, service_name="auth")
+    context.user_id = current_user.id
+    context.username = current_user.username
+
+    token_repo = RefreshTokenRepository(db)
+    provided_jti: Optional[str] = None
+    invalid_refresh_reason: Optional[str] = None
+
+    if logout_request and logout_request.refresh_token:
+        payload = decode_token(logout_request.refresh_token)
+        provided_jti = payload.get("jti") if payload else None
+
+        if not payload or payload.get("type") != "refresh":
+            invalid_refresh_reason = "Invalid refresh token payload provided during logout"
+        elif payload.get("sub") != current_user.id or not provided_jti:
+            invalid_refresh_reason = "Refresh token subject mismatch during logout"
+        else:
+            await token_repo.revoke_by_jti(provided_jti, reason="logout")
+
+    revoked_count = await token_repo.revoke_tokens_for_user(current_user.id, reason="logout")
+
+    if invalid_refresh_reason:
+        await audit_logger.log_authentication(
+            action="logout",
+            status=EventStatus.failure,
+            context=context,
+            authentication_method="refresh_token",
+            error_message=invalid_refresh_reason,
+            resource_type="refresh_token",
+            resource_id=provided_jti,
+            request_data={"refresh_jti": provided_jti} if provided_jti else None,
+            session=db,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid refresh token",
+        )
+
+    await audit_logger.log_authentication(
+        action="logout",
+        status=EventStatus.success,
+        context=context,
+        authentication_method="access_token",
+        resource_type="user",
+        resource_id=current_user.id,
+        request_data={
+            "revoked_tokens": revoked_count,
+            "refresh_jti": provided_jti,
+        },
+        session=db,
+    )
+
+
+@app.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    request: Request,
+    password_change: PasswordChangeRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_postgres_session),
+):
+    """
+    Change the authenticated user's password and invalidate existing refresh tokens.
+
+    - **current_password**: Current password for verification
+    - **new_password**: New password to set
+    """
+    context = AuditContext.from_request(request, service_name="auth")
+    context.user_id = current_user.id
+    context.username = current_user.username
+
+    token_repo = RefreshTokenRepository(db)
+    user_repo = UserRepository(db)
+
+    if not current_user.hashed_password:
+        await audit_logger.log_authentication(
+            action="password_change",
+            status=EventStatus.failure,
+            context=context,
+            authentication_method="password",
+            error_message="Password change not supported for this account",
+            resource_type="user",
+            resource_id=current_user.id,
+            session=db,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password change not available for this account",
+        )
+
+    if not verify_password(password_change.current_password, current_user.hashed_password):
+        await audit_logger.log_authentication(
+            action="password_change",
+            status=EventStatus.failure,
+            context=context,
+            authentication_method="password",
+            error_message="Invalid current password",
+            resource_type="user",
+            resource_id=current_user.id,
+            session=db,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid current password",
+        )
+
+    if verify_password(password_change.new_password, current_user.hashed_password):
+        await audit_logger.log_authentication(
+            action="password_change",
+            status=EventStatus.failure,
+            context=context,
+            authentication_method="password",
+            error_message="New password must be different from the current password",
+            resource_type="user",
+            resource_id=current_user.id,
+            session=db,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must differ from current password",
+        )
+
+    await user_repo.set_password(current_user.id, password_change.new_password)
+    await token_repo.revoke_tokens_for_user(current_user.id, reason="password_change")
+
+    await audit_logger.log_authentication(
+        action="password_change",
+        status=EventStatus.success,
+        context=context,
+        authentication_method="password",
+        resource_type="user",
+        resource_id=current_user.id,
+        session=db,
+    )
+
+
 @app.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     refresh_request: RefreshTokenRequest,
@@ -235,13 +395,16 @@ async def refresh_token(
     token_repo = RefreshTokenRepository(db)
     user_repo = UserRepository(db)
 
-    async def log_refresh_failure(reason: str):
+    async def log_refresh_failure(reason: str, token_jti: Optional[str] = None):
         await audit_logger.log_authentication(
             action="refresh_token",
             status=EventStatus.failure,
             context=context,
             authentication_method="refresh_token",
             error_message=reason,
+            resource_type="refresh_token",
+            resource_id=token_jti,
+            request_data={"refresh_jti": token_jti} if token_jti else None,
             session=db,
         )
 
@@ -259,7 +422,7 @@ async def refresh_token(
     context.user_id = user_id
 
     if not user_id or not jti:
-        await log_refresh_failure("Refresh token missing subject or jti")
+        await log_refresh_failure("Refresh token missing subject or jti", jti)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload"
@@ -267,7 +430,7 @@ async def refresh_token(
 
     token_record = await token_repo.get_by_jti(jti)
     if not token_record:
-        await log_refresh_failure("Refresh token record not found or already cleared")
+        await log_refresh_failure("Refresh token record not found or already cleared", jti)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
@@ -275,41 +438,52 @@ async def refresh_token(
 
     if token_record.user_id != user_id:
         await token_repo.revoke_by_jti(jti, reason="subject_mismatch")
-        await log_refresh_failure("Refresh token subject mismatch")
+        await log_refresh_failure("Refresh token subject mismatch", jti)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
 
-    if token_record.revoked_at:
-        await log_refresh_failure("Refresh token revoked")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token has been revoked"
-        )
-
-    if token_record.rotated_at:
-        await log_refresh_failure("Refresh token already rotated")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token already used"
-        )
-
     now = datetime.utcnow()
-    if token_record.expires_at <= now:
-        await token_repo.revoke_by_jti(jti, reason="expired")
-        await log_refresh_failure("Refresh token expired")
+    active_token = await token_repo.get_active_by_jti(jti)
+
+    if not active_token:
+        if token_record.revoked_at:
+            await log_refresh_failure("Refresh token revoked", jti)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked",
+            )
+
+        if token_record.rotated_at:
+            await log_refresh_failure("Refresh token already rotated", jti)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token already used",
+            )
+
+        if token_record.expires_at <= now:
+            await token_repo.revoke_by_jti(jti, reason="expired")
+            await log_refresh_failure("Refresh token expired", jti)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token expired",
+            )
+
+        await log_refresh_failure("Refresh token inactive", jti)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token expired"
+            detail="Invalid refresh token",
         )
+
+    token_record = active_token
 
     # Verify user still exists and is active
     user = await user_repo.get_user_by_id(user_id)
 
     if not user or not user.is_active:
         await token_repo.revoke_tokens_for_user(user_id, reason="user_inactive")
-        await log_refresh_failure("User not found or inactive")
+        await log_refresh_failure("User not found or inactive", jti)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive"
@@ -336,6 +510,9 @@ async def refresh_token(
         status=EventStatus.success,
         context=context,
         authentication_method="refresh_token",
+        resource_type="refresh_token",
+        resource_id=jti,
+        request_data={"refresh_jti": jti, "new_jti": new_jti},
         session=db,
     )
 
