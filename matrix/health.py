@@ -124,9 +124,17 @@ class HealthChecker:
             return ComponentHealth(
                 name="postgres",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Database connection failed: {str(e)}",
+                message=(
+                    f"Database connection failed to {settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}: "
+                    f"{str(e)}"
+                ),
                 latency_ms=None,
-                metadata={"error": type(e).__name__}
+                metadata={
+                    "error": type(e).__name__,
+                    "host": settings.postgres_host,
+                    "port": settings.postgres_port,
+                    "database": settings.postgres_db,
+                }
             )
 
     async def check_redis(self) -> ComponentHealth:
@@ -150,9 +158,16 @@ class HealthChecker:
             return ComponentHealth(
                 name="redis",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Redis connection failed: {str(e)}",
+                message=(
+                    f"Redis connection failed to {settings.redis_host}:{settings.redis_port}/db{settings.redis_db}: {str(e)}"
+                ),
                 latency_ms=None,
-                metadata={"error": type(e).__name__}
+                metadata={
+                    "error": type(e).__name__,
+                    "host": settings.redis_host,
+                    "port": settings.redis_port,
+                    "db": settings.redis_db,
+                }
             )
 
     async def check_mongodb(self) -> ComponentHealth:
@@ -176,9 +191,16 @@ class HealthChecker:
             return ComponentHealth(
                 name="mongodb",
                 status=HealthStatus.UNHEALTHY,
-                message=f"MongoDB connection failed: {str(e)}",
+                message=(
+                    f"MongoDB connection failed to {settings.mongo_host}:{settings.mongo_port}/{settings.mongo_db}: {str(e)}"
+                ),
                 latency_ms=None,
-                metadata={"error": type(e).__name__}
+                metadata={
+                    "error": type(e).__name__,
+                    "host": settings.mongo_host,
+                    "port": settings.mongo_port,
+                    "database": settings.mongo_db,
+                }
             )
 
     async def check_external_service(
