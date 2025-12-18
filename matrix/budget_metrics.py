@@ -55,9 +55,27 @@ provider_errors_total = Counter(
     ["provider", "model", "error_type"]
 )
 
+provider_timeouts_total = Counter(
+    "biowerk_llm_provider_timeouts_total",
+    "Total LLM provider timeouts by stage (primary, fallback, etc.)",
+    ["provider", "model", "stage"]
+)
+
 fallback_events_total = Counter(
     "biowerk_llm_fallback_events_total",
     "Total LLM fallback events across providers and reasons",
+    ["from_provider", "from_model", "to_provider", "to_model", "reason"]
+)
+
+fallback_attempts_total = Counter(
+    "biowerk_llm_fallback_attempts_total",
+    "Total attempts to route to fallback models/providers",
+    ["from_provider", "from_model", "to_provider", "to_model", "reason"]
+)
+
+fallback_failures_total = Counter(
+    "biowerk_llm_fallback_failures_total",
+    "Total fallback attempts that failed",
     ["from_provider", "from_model", "to_provider", "to_model", "reason"]
 )
 
@@ -241,6 +259,19 @@ def record_provider_error(
     ).inc()
 
 
+def record_provider_timeout(
+    provider: str,
+    model: str,
+    stage: str
+):
+    """Increment provider timeout counter with stage context (primary vs fallback)."""
+    provider_timeouts_total.labels(
+        provider=provider,
+        model=model,
+        stage=stage
+    ).inc()
+
+
 def record_fallback_event(
     original_provider: str,
     original_model: str,
@@ -250,6 +281,40 @@ def record_fallback_event(
 ):
     """Record a fallback routing event between providers/models."""
     fallback_events_total.labels(
+        from_provider=original_provider,
+        from_model=original_model,
+        to_provider=fallback_provider,
+        to_model=fallback_model,
+        reason=reason
+    ).inc()
+
+
+def record_fallback_attempt(
+    original_provider: str,
+    original_model: str,
+    fallback_provider: str,
+    fallback_model: str,
+    reason: str
+):
+    """Record an attempt to route to a fallback provider/model."""
+    fallback_attempts_total.labels(
+        from_provider=original_provider,
+        from_model=original_model,
+        to_provider=fallback_provider,
+        to_model=fallback_model,
+        reason=reason
+    ).inc()
+
+
+def record_fallback_failure(
+    original_provider: str,
+    original_model: str,
+    fallback_provider: str,
+    fallback_model: str,
+    reason: str
+):
+    """Record a failed fallback attempt."""
+    fallback_failures_total.labels(
         from_provider=original_provider,
         from_model=original_model,
         to_provider=fallback_provider,
