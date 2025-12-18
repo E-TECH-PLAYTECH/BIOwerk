@@ -13,6 +13,7 @@ This guide provides a single place to install, start, observe, and maintain BIOw
 
 BIOwerk ships development-only defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY`. The application now refuses to start in **staging** or **production** when those defaults are present.
 
+- **Development safety net**: when `ENVIRONMENT` is `development`, `dev`, or `local`, startup will log a warning instead of failing, so you notice the defaults before promoting the build.
 - **Local/Docker**: place secrets in `.env` or export them before running the control script or docker-compose:
   ```bash
   export JWT_SECRET_KEY=$(openssl rand -hex 64)
