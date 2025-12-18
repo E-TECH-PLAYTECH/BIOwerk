@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from typing import Optional
 import logging
 
@@ -117,15 +117,15 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 async def _fetch_api_key_candidate(api_key: str, db: AsyncSession) -> Optional[APIKey]:
     """Fetch a single API key candidate by identifier with expiry enforcement."""
     identifier = derive_api_key_identifier(api_key)
-    now = datetime.utcnow()
+    now = func.now()
 
-    stmt = select(APIKey).where(
+    candidate_stmt = select(APIKey).where(
         APIKey.key_identifier == identifier,
         APIKey.is_active == True,  # noqa: E712
         or_(APIKey.expires_at.is_(None), APIKey.expires_at > now),
     )
-    result = await db.execute(stmt)
-    candidate = result.scalar_one_or_none()
+    candidate_result = await db.execute(candidate_stmt)
+    candidate = candidate_result.scalar_one_or_none()
     if candidate:
         return candidate
 
