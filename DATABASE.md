@@ -103,12 +103,18 @@ API keys for service-to-service authentication.
 | id           | UUID      | Primary key                    |
 | user_id      | UUID      | Foreign key to users           |
 | key_hash     | String    | Hashed API key                 |
+| key_identifier | String  | HMAC-SHA256 digest/prefix for indexed lookup |
 | name         | String    | Friendly name                  |
 | scopes       | JSON      | Allowed scopes/permissions     |
 | is_active    | Boolean   | Active status                  |
 | last_used_at | Timestamp | Last usage time                |
 | expires_at   | Timestamp | Expiration time                |
 | created_at   | Timestamp | Creation time                  |
+
+**Indexes**
+- `idx_api_keys_identifier` on `key_identifier` for fast deterministic lookups
+- `idx_api_keys_expiry` on `expires_at` to prune stale keys
+- `idx_api_keys_active_expiry` on (`is_active`, `expires_at`) to short-circuit bcrypt verification for inactive/expired keys
 
 ### MongoDB Collections
 
