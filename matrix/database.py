@@ -59,6 +59,36 @@ async def _retry_async(operation_name: str, operation, fatal_exceptions: tuple =
 
     raise RuntimeError(f"{operation_name} failed after {max_attempts} attempts") from last_error
 
+
+def _retry_sync(operation_name: str, operation, fatal_exceptions: tuple = ()):  # pragma: no cover - thin sync wrapper
+    """Run a sync operation with bounded retries and jitter-aware backoff."""
+    last_error = None
+    max_attempts = settings.retry_max_attempts
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation()
+        except fatal_exceptions as exc:  # type: ignore[misc]
+            logger.error(
+                "Fatal error while performing %s: %s", operation_name, exc,
+                exc_info=True,
+            )
+            raise
+        except Exception as exc:
+            last_error = exc
+            delay = _calculate_backoff_delay(attempt)
+            logger.warning(
+                "Attempt %s/%s for %s failed: %s", attempt, max_attempts, operation_name, exc,
+                exc_info=settings.log_level.upper() == "DEBUG",
+            )
+
+            if attempt >= max_attempts:
+                break
+
+            time.sleep(delay)
+
+    raise RuntimeError(f"{operation_name} failed after {max_attempts} attempts") from last_error
+
 # SQLAlchemy Base for ORM models
 Base = declarative_base()
 
@@ -118,34 +148,56 @@ def get_postgres_engine():
         # Detect if using PgBouncer based on port
         is_using_pgbouncer = settings.postgres_port == 6432 or settings.postgres_host == "pgbouncer"
 
-        if is_using_pgbouncer:
-            # Smaller pools when using PgBouncer
-            # PgBouncer handles connection pooling, so we don't need large app pools
-            pool_size = 5
-            max_overflow = 5
-            logger.info("Using PgBouncer - configuring small application connection pool")
-        else:
-            # Larger pools for direct PostgreSQL connection
-            pool_size = 10
-            max_overflow = 20
-            logger.info("Direct PostgreSQL connection - using standard connection pool")
+        def _build_engine():
+            if is_using_pgbouncer:
+                # Smaller pools when using PgBouncer
+                # PgBouncer handles connection pooling, so we don't need large app pools
+                pool_size = 5
+                max_overflow = 5
+                logger.info("Using PgBouncer - configuring small application connection pool")
+            else:
+                # Larger pools for direct PostgreSQL connection
+                pool_size = 10
+                max_overflow = 20
+                logger.info("Direct PostgreSQL connection - using standard connection pool")
 
-        _pg_engine = create_async_engine(
-            settings.postgres_url,
-            echo=settings.log_level == "DEBUG",
-            pool_pre_ping=True,
-            pool_size=pool_size,
-            max_overflow=max_overflow,
-            # Pool recycle time - close connections after 1 hour
-            # Prevents stale connections and works well with PgBouncer
-            pool_recycle=3600,
-            # Timeout for getting connection from pool
-            pool_timeout=30,
-        )
-        logger.info(
-            f"PostgreSQL engine created: {settings.postgres_host}:{settings.postgres_port} "
-            f"(pool_size={pool_size}, max_overflow={max_overflow})"
-        )
+            engine = create_async_engine(
+                settings.postgres_url,
+                echo=settings.log_level == "DEBUG",
+                pool_pre_ping=True,
+                pool_size=pool_size,
+                max_overflow=max_overflow,
+                # Pool recycle time - close connections after 1 hour
+                # Prevents stale connections and works well with PgBouncer
+                pool_recycle=3600,
+                # Timeout for getting connection from pool
+                pool_timeout=30,
+            )
+            logger.info(
+                "PostgreSQL engine created: %s:%s (pool_size=%s, max_overflow=%s)",
+                settings.postgres_host,
+                settings.postgres_port,
+                pool_size,
+                max_overflow,
+            )
+            return engine
+
+        try:
+            _pg_engine = _retry_sync(
+                "PostgreSQL engine initialization",
+                _build_engine,
+                fatal_exceptions=(ArgumentError,),
+            )
+        except Exception as exc:
+            logger.critical(
+                "Failed to initialize PostgreSQL engine for %s:%s/%s after %s attempts: %s",
+                settings.postgres_host,
+                settings.postgres_port,
+                settings.postgres_db,
+                settings.retry_max_attempts,
+                exc,
+            )
+            raise
     return _pg_engine
 
 
@@ -193,12 +245,23 @@ async def ping_postgres() -> float:
 
 async def ensure_postgres_ready() -> None:
     """Ensure PostgreSQL is reachable with bounded retries."""
-    latency_ms = await _retry_async(
-        "PostgreSQL connectivity",
-        ping_postgres,
-        fatal_exceptions=(ArgumentError,),
-    )
-    logger.info("PostgreSQL ready (%.2fms)", latency_ms)
+    try:
+        latency_ms = await _retry_async(
+            "PostgreSQL connectivity",
+            ping_postgres,
+            fatal_exceptions=(ArgumentError,),
+        )
+        logger.info("PostgreSQL ready (%.2fms)", latency_ms)
+    except Exception as exc:
+        logger.critical(
+            "PostgreSQL unreachable at %s:%s/%s after %s attempts: %s",
+            settings.postgres_host,
+            settings.postgres_port,
+            settings.postgres_db,
+            settings.retry_max_attempts,
+            exc,
+        )
+        raise
 
 
 async def close_postgres():
@@ -219,12 +282,36 @@ def get_mongo_client() -> AsyncIOMotorClient:
     """Get or create MongoDB client."""
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = AsyncIOMotorClient(
-            settings.mongo_url,
-            maxPoolSize=50,
-            minPoolSize=10,
-        )
-        logger.info(f"MongoDB client created: {settings.mongo_host}:{settings.mongo_port}")
+        def _build_mongo_client() -> AsyncIOMotorClient:
+            client = AsyncIOMotorClient(
+                settings.mongo_url,
+                maxPoolSize=50,
+                minPoolSize=10,
+            )
+            logger.info(
+                "MongoDB client created: %s:%s (db=%s)",
+                settings.mongo_host,
+                settings.mongo_port,
+                settings.mongo_db,
+            )
+            return client
+
+        try:
+            _mongo_client = _retry_sync(
+                "MongoDB client initialization",
+                _build_mongo_client,
+                fatal_exceptions=(ConfigurationError,),
+            )
+        except Exception as exc:
+            logger.critical(
+                "Failed to initialize MongoDB client for %s:%s/%s after %s attempts: %s",
+                settings.mongo_host,
+                settings.mongo_port,
+                settings.mongo_db,
+                settings.retry_max_attempts,
+                exc,
+            )
+            raise
     return _mongo_client
 
 
@@ -247,12 +334,23 @@ async def ping_mongo() -> float:
 
 async def ensure_mongo_ready() -> None:
     """Ensure MongoDB is reachable with bounded retries."""
-    latency_ms = await _retry_async(
-        "MongoDB connectivity",
-        ping_mongo,
-        fatal_exceptions=(ConfigurationError,),
-    )
-    logger.info("MongoDB ready (%.2fms)", latency_ms)
+    try:
+        latency_ms = await _retry_async(
+            "MongoDB connectivity",
+            ping_mongo,
+            fatal_exceptions=(ConfigurationError,),
+        )
+        logger.info("MongoDB ready (%.2fms)", latency_ms)
+    except Exception as exc:
+        logger.critical(
+            "MongoDB unreachable at %s:%s/%s after %s attempts: %s",
+            settings.mongo_host,
+            settings.mongo_port,
+            settings.mongo_db,
+            settings.retry_max_attempts,
+            exc,
+        )
+        raise
 
 
 async def close_mongo():
@@ -273,12 +371,36 @@ def get_redis_client() -> Redis:
     """Get or create Redis client."""
     global _redis_client
     if _redis_client is None:
-        _redis_client = Redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            max_connections=50,
-        )
-        logger.info(f"Redis client created: {settings.redis_host}:{settings.redis_port}")
+        def _build_redis_client() -> Redis:
+            client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                max_connections=50,
+            )
+            logger.info(
+                "Redis client created: %s:%s (db=%s)",
+                settings.redis_host,
+                settings.redis_port,
+                settings.redis_db,
+            )
+            return client
+
+        try:
+            _redis_client = _retry_sync(
+                "Redis client initialization",
+                _build_redis_client,
+                fatal_exceptions=(RedisError,),
+            )
+        except Exception as exc:
+            logger.critical(
+                "Failed to initialize Redis client for %s:%s/db%s after %s attempts: %s",
+                settings.redis_host,
+                settings.redis_port,
+                settings.redis_db,
+                settings.retry_max_attempts,
+                exc,
+            )
+            raise
     return _redis_client
 
 
@@ -292,12 +414,23 @@ async def ping_redis() -> float:
 
 async def ensure_redis_ready() -> None:
     """Ensure Redis is reachable with bounded retries."""
-    latency_ms = await _retry_async(
-        "Redis connectivity",
-        ping_redis,
-        fatal_exceptions=(RedisError,),
-    )
-    logger.info("Redis ready (%.2fms)", latency_ms)
+    try:
+        latency_ms = await _retry_async(
+            "Redis connectivity",
+            ping_redis,
+            fatal_exceptions=(RedisError,),
+        )
+        logger.info("Redis ready (%.2fms)", latency_ms)
+    except Exception as exc:
+        logger.critical(
+            "Redis unreachable at %s:%s/db%s after %s attempts: %s",
+            settings.redis_host,
+            settings.redis_port,
+            settings.redis_db,
+            settings.retry_max_attempts,
+            exc,
+        )
+        raise
 
 
 async def close_redis():

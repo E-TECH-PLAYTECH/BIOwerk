@@ -9,17 +9,34 @@ Tests cover:
 - Connection pool configuration
 - Error handling
 """
+import asyncio
+import sys
+import types
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Prevent optional dependencies from breaking isolated unit tests
+sys.modules.setdefault("blake3", MagicMock())
+sys.modules.setdefault("pymongo", MagicMock())
+sys.modules.setdefault("pymongo.errors", types.SimpleNamespace(ConfigurationError=Exception))
+sys.modules.setdefault("motor", MagicMock())
+sys.modules.setdefault("motor.motor_asyncio", types.SimpleNamespace(AsyncIOMotorClient=MagicMock()))
+_auth_stub = types.SimpleNamespace()
+sys.modules.setdefault("matrix.auth", _auth_stub)
+sys.modules.setdefault("matrix.auth_dependencies", _auth_stub)
+sys.modules.setdefault("matrix.token_repository", _auth_stub)
+sys.modules.setdefault("matrix.db_models", _auth_stub)
+sys.modules.setdefault("matrix.user_repository", _auth_stub)
 
 
 # ============================================================================
 # PostgreSQL Tests
 # ============================================================================
 
-@pytest.mark.asyncio
-async def test_get_postgres_engine():
+
+def test_get_postgres_engine():
     """Test PostgreSQL engine creation."""
     from matrix.database import get_postgres_engine
 
@@ -28,6 +45,12 @@ async def test_get_postgres_engine():
         mock_settings.postgres_host = "localhost"
         mock_settings.postgres_port = 5432
         mock_settings.log_level = "INFO"
+        mock_settings.postgres_db = "db"
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         # Reset global engine
         import matrix.database
@@ -39,8 +62,7 @@ async def test_get_postgres_engine():
         assert engine == get_postgres_engine()  # Should return same instance
 
 
-@pytest.mark.asyncio
-async def test_get_postgres_engine_with_pgbouncer():
+def test_get_postgres_engine_with_pgbouncer():
     """Test PostgreSQL engine creation with PgBouncer."""
     from matrix.database import get_postgres_engine
 
@@ -49,6 +71,12 @@ async def test_get_postgres_engine_with_pgbouncer():
         mock_settings.postgres_host = "pgbouncer"
         mock_settings.postgres_port = 6432
         mock_settings.log_level = "INFO"
+        mock_settings.postgres_db = "db"
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         # Reset global engine
         import matrix.database
@@ -60,8 +88,7 @@ async def test_get_postgres_engine_with_pgbouncer():
         # PgBouncer should use smaller pool sizes
 
 
-@pytest.mark.asyncio
-async def test_get_postgres_session_maker():
+def test_get_postgres_session_maker():
     """Test PostgreSQL session maker creation."""
     from matrix.database import get_postgres_session_maker
 
@@ -77,8 +104,7 @@ async def test_get_postgres_session_maker():
         assert session_maker is not None
 
 
-@pytest.mark.asyncio
-async def test_get_postgres_session():
+def test_get_postgres_session():
     """Test PostgreSQL session dependency."""
     from matrix.database import get_postgres_session
 
@@ -90,22 +116,32 @@ async def test_get_postgres_session():
 
         mock_maker.return_value.return_value = mock_context
 
-        async for session in get_postgres_session():
-            assert session is not None
+        async def _run():
+            async for session in get_postgres_session():
+                assert session is not None
+
+        asyncio.run(_run())
 
 
 # ============================================================================
 # MongoDB Tests
 # ============================================================================
 
-@pytest.mark.asyncio
-async def test_get_mongo_client():
+
+def test_get_mongo_client():
     """Test MongoDB client creation."""
     from matrix.database import get_mongo_client
 
     with patch("matrix.database.settings") as mock_settings:
         mock_settings.mongo_url = "mongodb://localhost:27017"
-        mock_settings.mongo_db_name = "testdb"
+        mock_settings.mongo_db = "testdb"
+        mock_settings.mongo_host = "localhost"
+        mock_settings.mongo_port = 27017
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         with patch("matrix.database.AsyncIOMotorClient") as mock_motor:
             mock_client = MagicMock()
@@ -120,14 +156,20 @@ async def test_get_mongo_client():
             assert client is not None
 
 
-@pytest.mark.asyncio
-async def test_get_mongo_database():
+def test_get_mongo_database():
     """Test MongoDB database retrieval."""
-    from matrix.database import get_mongo_database
+    from matrix.database import get_mongo_db
 
     with patch("matrix.database.settings") as mock_settings:
         mock_settings.mongo_url = "mongodb://localhost:27017"
-        mock_settings.mongo_db_name = "testdb"
+        mock_settings.mongo_db = "testdb"
+        mock_settings.mongo_host = "localhost"
+        mock_settings.mongo_port = 27017
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         with patch("matrix.database.get_mongo_client") as mock_client:
             mock_db = MagicMock()
@@ -137,7 +179,7 @@ async def test_get_mongo_database():
             import matrix.database
             matrix.database._mongo_db = None
 
-            db = get_mongo_database()
+            db = get_mongo_db()
 
             assert db is not None
 
@@ -146,13 +188,21 @@ async def test_get_mongo_database():
 # Redis Tests
 # ============================================================================
 
-@pytest.mark.asyncio
-async def test_get_redis_client():
+
+def test_get_redis_client():
     """Test Redis client creation."""
     from matrix.database import get_redis_client
 
     with patch("matrix.database.settings") as mock_settings:
         mock_settings.redis_url = "redis://localhost:6379/0"
+        mock_settings.redis_host = "localhost"
+        mock_settings.redis_port = 6379
+        mock_settings.redis_db = 0
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         with patch("matrix.database.Redis") as mock_redis:
             mock_client = AsyncMock()
@@ -167,13 +217,20 @@ async def test_get_redis_client():
             assert client is not None
 
 
-@pytest.mark.asyncio
-async def test_redis_ping():
+def test_redis_ping():
     """Test Redis connection health check."""
     from matrix.database import get_redis_client
 
     with patch("matrix.database.settings") as mock_settings:
         mock_settings.redis_url = "redis://localhost:6379/0"
+        mock_settings.redis_host = "localhost"
+        mock_settings.redis_port = 6379
+        mock_settings.redis_db = 0
+        mock_settings.retry_initial_delay = 0.01
+        mock_settings.retry_exponential_base = 2
+        mock_settings.retry_max_delay = 0.1
+        mock_settings.retry_jitter = False
+        mock_settings.retry_max_attempts = 3
 
         with patch("matrix.database.Redis") as mock_redis:
             mock_client = AsyncMock()
@@ -186,7 +243,7 @@ async def test_redis_ping():
 
             client = get_redis_client()
 
-            result = await client.ping()
+            result = asyncio.run(client.ping())
 
             assert result is True
 
@@ -195,19 +252,19 @@ async def test_redis_ping():
 # Connection Cleanup Tests
 # ============================================================================
 
-@pytest.mark.asyncio
-async def test_close_connections():
+
+def test_close_connections():
     """Test database connection cleanup."""
-    from matrix.database import close_database_connections
+    from matrix.database import close_databases
 
     with patch("matrix.database._pg_engine") as mock_pg_engine:
         with patch("matrix.database._mongo_client") as mock_mongo:
             with patch("matrix.database._redis_client") as mock_redis:
                 mock_pg_engine.dispose = AsyncMock()
-                mock_mongo.close = AsyncMock()
+                mock_mongo.close = MagicMock()
                 mock_redis.close = AsyncMock()
 
-                await close_database_connections()
+                asyncio.run(close_databases())
 
                 mock_pg_engine.dispose.assert_called_once()
                 mock_mongo.close.assert_called_once()
