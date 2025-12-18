@@ -253,6 +253,7 @@ class Settings(BaseSettings):
         """Run security validations after settings load."""
 
         env = (self.environment or "development").strip().lower()
+        env_requires_strong_secrets = env in {"staging", "production"}
         defaulted_secrets = []
 
         if self.jwt_secret_key == DEFAULT_JWT_SECRET:
@@ -261,12 +262,12 @@ class Settings(BaseSettings):
         if self.encryption_master_key == DEFAULT_ENCRYPTION_MASTER_KEY:
             defaulted_secrets.append("encryption_master_key")
 
-        if env != "development" and defaulted_secrets:
+        if env_requires_strong_secrets and defaulted_secrets:
             secret_list = ", ".join(defaulted_secrets)
             raise ValueError(
                 "Security configuration invalid: default secrets detected in the "
                 f"{self.environment!r} environment ({secret_list}). "
-                "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, environment-specific values."
+                "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, environment-specific values before deploying."
             )
 
         if env == "development" and defaulted_secrets:
