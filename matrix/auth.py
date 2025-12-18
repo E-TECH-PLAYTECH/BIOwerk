@@ -1,6 +1,6 @@
 """Authentication utilities for JWT tokens and password hashing."""
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import hashlib
 import hmac
 from jose import JWTError, jwt

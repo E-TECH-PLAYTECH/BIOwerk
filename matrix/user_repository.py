@@ -88,6 +88,11 @@ class UserRepository:
         await self.db.commit()
         return result.scalar_one_or_none()
 
+    async def set_password(self, user_id: str, new_password: str) -> Optional[User]:
+        """Update a user's password with hashing."""
+        hashed_password = hash_password(new_password)
+        return await self.update_user(user_id, hashed_password=hashed_password)
+
     async def delete_user(self, user_id: str) -> bool:
         """Delete user (soft delete by setting is_active=False)."""
         stmt = update(User).where(User.id == user_id).values(is_active=False)
