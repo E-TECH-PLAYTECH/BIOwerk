@@ -261,10 +261,12 @@ class Settings(BaseSettings):
         if self.encryption_master_key == DEFAULT_ENCRYPTION_MASTER_KEY:
             defaulted_secrets.append("encryption_master_key")
 
-        if env != "development" and defaulted_secrets:
+        production_like_envs = {"production", "staging"}
+
+        if env in production_like_envs and defaulted_secrets:
             secret_list = ", ".join(defaulted_secrets)
             raise ValueError(
-                "Security configuration invalid: default secrets detected in the "
+                "Security configuration invalid: shipped defaults detected in the "
                 f"{self.environment!r} environment ({secret_list}). "
                 "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, environment-specific values."
             )

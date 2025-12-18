@@ -179,7 +179,7 @@ BIOwerk implements a comprehensive secrets management strategy to ensure credent
 - Never commit `.env` files to version control
 - Use unique secrets for each environment (dev/staging/production)
 - Rotate development secrets every 90 days
-- Default development secrets (`JWT_SECRET_KEY`, `ENCRYPTION_MASTER_KEY`) are rejected at startup for non-development environments; override them with strong, unique values before promoting a build.
+- Default development secrets (`JWT_SECRET_KEY`, `ENCRYPTION_MASTER_KEY`) are rejected at startup for staging/production, and development emits warnings when defaults are present; override them with strong, unique values before promoting a build.
 
 #### Production Secrets Management
 
