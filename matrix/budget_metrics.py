@@ -41,6 +41,26 @@ request_duration_seconds = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0]
 )
 
+# Provider Resilience Metrics
+provider_latency_seconds = Histogram(
+    "biowerk_llm_provider_latency_seconds",
+    "LLM provider call latency in seconds",
+    ["provider", "model", "outcome"],
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+)
+
+provider_errors_total = Counter(
+    "biowerk_llm_provider_errors_total",
+    "Total LLM provider errors by type",
+    ["provider", "model", "error_type"]
+)
+
+fallback_events_total = Counter(
+    "biowerk_llm_fallback_events_total",
+    "Total LLM fallback events across providers and reasons",
+    ["from_provider", "from_model", "to_provider", "to_model", "reason"]
+)
+
 # ============================================================================
 # Budget Metrics
 # ============================================================================
@@ -192,6 +212,50 @@ def record_request_duration(
         model=model,
         service=svc
     ).observe(duration_seconds)
+
+
+def record_provider_latency(
+    provider: str,
+    model: str,
+    duration_seconds: float,
+    outcome: str
+):
+    """Record provider latency with outcome (success, timeout, error)."""
+    provider_latency_seconds.labels(
+        provider=provider,
+        model=model,
+        outcome=outcome
+    ).observe(duration_seconds)
+
+
+def record_provider_error(
+    provider: str,
+    model: str,
+    error_type: str
+):
+    """Increment provider error counter for given error type."""
+    provider_errors_total.labels(
+        provider=provider,
+        model=model,
+        error_type=error_type
+    ).inc()
+
+
+def record_fallback_event(
+    original_provider: str,
+    original_model: str,
+    fallback_provider: str,
+    fallback_model: str,
+    reason: str
+):
+    """Record a fallback routing event between providers/models."""
+    fallback_events_total.labels(
+        from_provider=original_provider,
+        from_model=original_model,
+        to_provider=fallback_provider,
+        to_model=fallback_model,
+        reason=reason
+    ).inc()
 
 
 def update_budget_metrics(
