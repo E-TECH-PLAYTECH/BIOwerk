@@ -3,8 +3,8 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from typing import Optional, List
+from sqlalchemy import select, or_, func
+from typing import Optional
 import logging
 
 from .database import get_postgres_session
@@ -117,17 +117,17 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 async def _fetch_api_key_candidates(api_key: str, db: AsyncSession) -> List[APIKey]:
     """Fetch active, unexpired API key candidates by identifier before bcrypt verification."""
     identifier = derive_api_key_identifier(api_key)
-    now = datetime.utcnow()
+    now = func.now()
 
-    stmt = select(APIKey).where(
+    candidate_stmt = select(APIKey).where(
         APIKey.key_identifier == identifier,
         APIKey.is_active == True,  # noqa: E712
         or_(APIKey.expires_at.is_(None), APIKey.expires_at > now),
     )
-    result = await db.execute(stmt)
-    candidates = list(result.scalars().all())
-    if candidates:
-        return candidates
+    candidate_result = await db.execute(candidate_stmt)
+    candidate = candidate_result.scalar_one_or_none()
+    if candidate:
+        return candidate
 
     expired_stmt = select(APIKey.expires_at).where(
         APIKey.key_identifier == identifier,
