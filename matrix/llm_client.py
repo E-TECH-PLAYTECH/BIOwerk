@@ -1,9 +1,9 @@
 """LLM client utility for unified access to OpenAI, Anthropic, DeepSeek, Ollama, and Local models."""
 import asyncio
 import logging
-import os
+import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 import ollama
@@ -96,10 +96,20 @@ class LLMClient:
             "service_name": f"llm-{provider}",
         }
 
-    def _get_provider_timeout(self, provider: str, override: Optional[float] = None) -> float:
+    def _get_provider_timeout(
+        self,
+        provider: str,
+        override: Optional[float] = None,
+        provider_timeouts: Optional[Dict[str, float]] = None
+    ) -> float:
         """Get the timeout to apply for a specific provider call."""
         if override is not None:
             return float(override)
+
+        provider = (provider or self.provider).lower()
+        normalized_timeouts = {k.lower(): float(v) for k, v in (provider_timeouts or {}).items()}
+        if provider in normalized_timeouts:
+            return normalized_timeouts[provider]
 
         provider = (provider or self.provider).lower()
         if provider == "openai":
@@ -178,7 +188,9 @@ class LLMClient:
         provider: Optional[str] = None,
         model: Optional[str] = None,
         json_mode: bool = False,
-        timeout: Optional[float] = None
+        timeout: Optional[float] = None,
+        provider_timeouts: Optional[Dict[str, float]] = None,
+        allow_fallback: bool = True
     ) -> str:
         """
         Generate a chat completion using the configured LLM provider.
@@ -192,6 +204,8 @@ class LLMClient:
             model: Override default model
             json_mode: Enable JSON response mode
             timeout: Optional per-call timeout override in seconds
+            provider_timeouts: Optional mapping of provider -> timeout override (seconds)
+            allow_fallback: Whether to allow automatic fallback routing on failure
 
         Returns:
             Generated text response
@@ -201,61 +215,242 @@ class LLMClient:
             Exception: If API call fails
         """
         provider = (provider or self.provider).lower()
+        effective_timeouts = {k.lower(): v for k, v in (provider_timeouts or {}).items()}
         model_name = model or self._get_default_model(provider)
-        timeout_seconds = self._get_provider_timeout(provider, timeout)
-        start_time = time.time()
-        outcome = "success"
+        timeout_seconds = self._get_provider_timeout(provider, timeout, effective_timeouts)
 
         async def _dispatch():
-            if provider == "openai":
-                return await self._openai_completion(
-                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
-                )
-            if provider == "anthropic":
-                return await self._anthropic_completion(
-                    messages, system_prompt, temperature, max_tokens, model_name
-                )
-            if provider == "deepseek":
-                return await self._deepseek_completion(
-                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
-                )
-            if provider == "ollama":
-                return await self._ollama_completion(
-                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
-                )
-            if provider == "local":
-                return await self._local_completion(
-                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
-                )
+            return await self._dispatch_provider(
+                provider=provider,
+                model_name=model_name,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode
+            )
 
-            raise ValueError(f"Invalid LLM provider: {provider}")
+        try:
+            return await self._invoke_provider(
+                provider=provider,
+                model_name=model_name,
+                timeout_seconds=timeout_seconds,
+                dispatcher=_dispatch,
+                stage="primary",
+            )
+        except Exception as error:
+            fallback_response = await self._maybe_route_to_fallback(
+                error=error,
+                provider=provider,
+                model_name=model_name,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+                provider_timeouts=effective_timeouts,
+                allow_fallback=allow_fallback,
+            )
+            if fallback_response is not None:
+                return fallback_response
+            raise
+
+    async def _invoke_provider(
+        self,
+        provider: str,
+        model_name: str,
+        timeout_seconds: float,
+        dispatcher: Callable[[], Awaitable[str]],
+        stage: str,
+    ) -> str:
+        """Invoke a provider with resilience, metrics, and structured logging."""
+        start_time = time.time()
+        outcome = "success"
 
         try:
             return await self._execute_with_resilience(
                 provider,
-                lambda: asyncio.wait_for(_dispatch(), timeout=timeout_seconds)
+                lambda: asyncio.wait_for(dispatcher(), timeout=timeout_seconds),
             )
-        except asyncio.TimeoutError as e:
+        except asyncio.TimeoutError as exc:
             outcome = "timeout"
             budget_metrics.record_provider_error(provider, model_name, "TimeoutError")
+            budget_metrics.record_provider_timeout(provider, model_name, stage)
             logger.error(
                 "LLM completion timed out",
                 exc_info=True,
-                extra={"provider": provider, "model": model_name, "timeout_seconds": timeout_seconds}
+                extra={
+                    "provider": provider,
+                    "model": model_name,
+                    "timeout_seconds": timeout_seconds,
+                    "stage": stage,
+                },
             )
-            raise e
-        except Exception as e:
+            raise exc
+        except Exception as exc:
             outcome = "error"
-            budget_metrics.record_provider_error(provider, model_name, type(e).__name__)
+            budget_metrics.record_provider_error(provider, model_name, type(exc).__name__)
             logger.error(
-                f"LLM completion failed: {str(e)}",
+                f"LLM completion failed during {stage}: {str(exc)}",
                 exc_info=True,
-                extra={"provider": provider, "model": model_name}
+                extra={"provider": provider, "model": model_name, "stage": stage},
             )
             raise
         finally:
             duration = time.time() - start_time
             budget_metrics.record_provider_latency(provider, model_name, duration, outcome)
+            budget_metrics.record_request_duration(
+                provider=provider,
+                model=model_name,
+                duration_seconds=duration,
+                service="llm_client",
+            )
+
+    async def _maybe_route_to_fallback(
+        self,
+        error: Exception,
+        provider: str,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        json_mode: bool,
+        provider_timeouts: Dict[str, float],
+        allow_fallback: bool,
+    ) -> Optional[str]:
+        """Route to configured default fallback provider when permitted."""
+        if not allow_fallback:
+            logger.info(
+                "Fallback skipped by caller configuration",
+                extra={"provider": provider, "model": model_name},
+            )
+            return None
+
+        if not settings.budget_auto_fallback:
+            logger.debug(
+                "Budget-aware fallback disabled via settings",
+                extra={"provider": provider, "model": model_name},
+            )
+            return None
+
+        fallback_provider = (settings.budget_default_fallback_provider or "").lower()
+        fallback_model = settings.budget_default_fallback_model
+
+        if not fallback_provider:
+            logger.debug(
+                "No fallback provider configured; skipping fallback routing",
+                extra={"provider": provider, "model": model_name},
+            )
+            return None
+
+        if fallback_provider == provider and fallback_model == model_name:
+            logger.debug(
+                "Fallback target matches primary request; avoiding loop",
+                extra={"provider": provider, "model": model_name},
+            )
+            return None
+
+        reason = "timeout" if isinstance(error, asyncio.TimeoutError) else "error"
+        budget_metrics.record_fallback_attempt(
+            original_provider=provider,
+            original_model=model_name,
+            fallback_provider=fallback_provider,
+            fallback_model=fallback_model,
+            reason=f"default_{reason}",
+        )
+
+        logger.warning(
+            "Primary provider failed; attempting budget default fallback",
+            extra={
+                "provider": provider,
+                "model": model_name,
+                "fallback_provider": fallback_provider,
+                "fallback_model": fallback_model,
+                "reason": reason,
+            },
+        )
+
+        fallback_timeout = self._get_provider_timeout(
+            fallback_provider, provider_timeouts=provider_timeouts
+        )
+
+        try:
+            response = await self._invoke_provider(
+                provider=fallback_provider,
+                model_name=fallback_model,
+                timeout_seconds=fallback_timeout,
+                dispatcher=lambda: self._dispatch_provider(
+                    provider=fallback_provider,
+                    model_name=fallback_model,
+                    messages=messages,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                ),
+                stage="fallback",
+            )
+            budget_metrics.record_fallback_event(
+                original_provider=provider,
+                original_model=model_name,
+                fallback_provider=fallback_provider,
+                fallback_model=fallback_model,
+                reason=f"default_{reason}",
+            )
+            return response
+        except Exception as fallback_error:
+            budget_metrics.record_fallback_failure(
+                original_provider=provider,
+                original_model=model_name,
+                fallback_provider=fallback_provider,
+                fallback_model=fallback_model,
+                reason=f"default_{reason}",
+            )
+            logger.error(
+                "Fallback provider failed",
+                exc_info=True,
+                extra={
+                    "provider": fallback_provider,
+                    "model": fallback_model,
+                    "reason": reason,
+                },
+            )
+            raise fallback_error
+
+    async def _dispatch_provider(
+        self,
+        provider: str,
+        model_name: str,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str],
+        temperature: Optional[float],
+        max_tokens: Optional[int],
+        json_mode: bool,
+    ) -> str:
+        """Route the request to the correct provider-specific completion implementation."""
+        if provider == "openai":
+            return await self._openai_completion(
+                messages, system_prompt, temperature, max_tokens, model_name, json_mode
+            )
+        if provider == "anthropic":
+            return await self._anthropic_completion(
+                messages, system_prompt, temperature, max_tokens, model_name
+            )
+        if provider == "deepseek":
+            return await self._deepseek_completion(
+                messages, system_prompt, temperature, max_tokens, model_name, json_mode
+            )
+        if provider == "ollama":
+            return await self._ollama_completion(
+                messages, system_prompt, temperature, max_tokens, model_name, json_mode
+            )
+        if provider == "local":
+            return await self._local_completion(
+                messages, system_prompt, temperature, max_tokens, model_name, json_mode
+            )
+
+        raise ValueError(f"Invalid LLM provider: {provider}")
 
     async def _openai_completion(
         self,
