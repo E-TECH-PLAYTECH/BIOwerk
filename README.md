@@ -171,8 +171,8 @@ python scripts/security_scan.py --deps-only
 
 **Production secret requirements:**
 - The shipped defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY` are for local development only.
-- Startup will fail in staging/production if either secret still matches the defaults; development will emit a warning when defaults are used.
-- Always set strong, environment-specific values (32+ characters, generated per environment) via environment variables (`JWT_SECRET_KEY`, `ENCRYPTION_MASTER_KEY`) before deploying.
+- Startup will fail in staging/production if either secret still matches the defaults; development emits warnings when defaults are used so you do not ship them by mistake.
+- Always set strong, environment-specific values (32+ characters, generated per environment) via environment variables before deploying.
 
 ### 📊 Security Monitoring
 - **Prometheus metrics** for rate limits and auth events
