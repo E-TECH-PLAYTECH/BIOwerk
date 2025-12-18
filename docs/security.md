@@ -117,6 +117,14 @@ TLS_KEY_FILE=./certs/key.pem
 TLS_MIN_VERSION=TLSv1.2
 ```
 
+### Compliance Guardrails
+
+- **Environment-aware enforcement**: Production environments reject self-signed certificates entirely (the generator refuses to run and TLS configuration raises an error).
+- **Certificate strength**: RSA keys must be **≥2048 bits** and EC keys **≥256 bits**; weaker keys are rejected during validation.
+- **Hostname alignment**: The Common Name **must** appear in the SAN, and expected hostnames/IPs should be provided via `TLS_EXPECTED_HOSTNAMES` to guarantee SAN enforcement.
+- **Explicit protocol selection**: `TLS_MIN_VERSION` and a cipher suite **must be set explicitly** in production (set `TLS_CIPHERS` to the hardened list from `matrix.tls.TLSConfig.SECURE_CIPHERS`).
+- **Revocation visibility**: Production certificates must publish **OCSP** or **CRL** endpoints. Missing endpoints are treated as errors in production and warnings in lower environments.
+
 #### 3. Restart Services
 
 ```bash

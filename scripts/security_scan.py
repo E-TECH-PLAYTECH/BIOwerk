@@ -161,6 +161,14 @@ def validate_tls_certificates() -> bool:
         from matrix.config import settings
         from matrix.tls import TLSConfig
 
+        environment = os.getenv("ENVIRONMENT", getattr(settings, "environment", "development")).lower()
+        expected_hostnames_env = os.getenv("TLS_EXPECTED_HOSTNAMES")
+        expected_hostnames = (
+            [host.strip() for host in expected_hostnames_env.split(",") if host.strip()]
+            if expected_hostnames_env
+            else None
+        )
+
         if not settings.tls_enabled:
             print_status("INFO", "TLS is disabled (development mode)")
             print_status("WARN", "Enable TLS for production deployments")
@@ -186,7 +194,11 @@ def validate_tls_certificates() -> bool:
 
         # Validate certificate
         try:
-            metadata = TLSConfig.validate_certificate(str(cert_file))
+            metadata = TLSConfig.validate_certificate(
+                str(cert_file),
+                expected_hostnames=expected_hostnames,
+                environment=environment,
+            )
 
             print()
             print("Certificate details:")
@@ -195,6 +207,11 @@ def validate_tls_certificates() -> bool:
             print(f"  Valid from: {metadata['not_before']}")
             print(f"  Valid until: {metadata['not_after']}")
             print(f"  Days remaining: {metadata['days_remaining']}")
+            print(f"  Key: {metadata['key_type']} ({metadata['key_size']} bits)")
+            print(f"  SAN DNS: {', '.join(metadata['san_dns']) or 'None'}")
+            print(f"  SAN IPs: {', '.join(metadata['san_ips']) or 'None'}")
+            print(f"  OCSP Responders: {', '.join(metadata['ocsp_urls']) or 'None'}")
+            print(f"  CRL Distribution Points: {', '.join(metadata['crl_urls']) or 'None'}")
             print()
 
             # Check expiration
@@ -212,9 +229,25 @@ def validate_tls_certificates() -> bool:
             # Check self-signed
             if metadata['is_self_signed']:
                 print_status("WARN", "Certificate is self-signed (development only)")
-                if os.getenv("ENVIRONMENT", "development") == "production":
+                if environment == "production":
                     print_status("FAIL", "Self-signed certificates should NOT be used in production")
                     return False
+
+            if expected_hostnames:
+                print_status("PASS", f"SAN contains expected hostnames/IPs: {expected_hostnames}")
+            elif metadata["common_name"] not in metadata["san_dns"]:
+                print_status("WARN", "Common Name is not present in SAN. Align SAN entries to include the service hostname.")
+
+            if not metadata["ocsp_urls"] and not metadata["crl_urls"]:
+                if environment == "production":
+                    print_status("FAIL", "Certificate lacks OCSP/CRL endpoints required for production revocation checks")
+                    return False
+                print_status("WARN", "Certificate does not advertise OCSP/CRL endpoints (revocation checks unavailable)")
+            else:
+                print_status(
+                    "PASS",
+                    f"Revocation endpoints discovered (OCSP: {bool(metadata['ocsp_urls'])}, CRL: {bool(metadata['crl_urls'])})",
+                )
 
             return True
 

@@ -10,6 +10,7 @@ This module provides:
 """
 import ssl
 import os
+import socket
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
@@ -50,6 +51,8 @@ class TLSConfig:
         verify_client: bool = False,
         min_version: str = "TLSv1.2",
         ciphers: Optional[str] = None,
+        expected_hostnames: Optional[list[str]] = None,
+        environment: str = os.getenv("ENVIRONMENT", "development"),
     ) -> ssl.SSLContext:
         """
         Create a secure SSL context for HTTPS servers.
@@ -61,6 +64,8 @@ class TLSConfig:
             verify_client: Require and verify client certificates (mTLS)
             min_version: Minimum TLS version ("TLSv1.2" or "TLSv1.3")
             ciphers: Custom cipher suite (None = use secure defaults)
+            expected_hostnames: Hostnames/IPs that must appear in the certificate SAN
+            environment: Deployment environment (development, staging, production)
 
         Returns:
             Configured SSL context
@@ -70,6 +75,8 @@ class TLSConfig:
             ssl.SSLError: If certificate/key loading fails
             ValueError: If configuration is invalid
         """
+        normalized_env = cls._normalize_environment(environment)
+
         # Validate certificate files exist
         cert_path = Path(cert_file)
         key_path = Path(key_file)
@@ -87,6 +94,25 @@ class TLSConfig:
             if not ca_path.exists():
                 raise FileNotFoundError(f"CA certificate file not found: {ca_file}")
 
+        # Validate certificate metadata up front
+        metadata = cls.validate_certificate(
+            cert_file=str(cert_path),
+            expected_hostnames=expected_hostnames or [socket.getfqdn(), socket.gethostname()],
+            environment=normalized_env,
+        )
+
+        if normalized_env == "production" and metadata.get("is_self_signed", False):
+            raise ValueError(
+                "Self-signed certificates are not permitted in production. "
+                "Provision a CA-signed certificate."
+            )
+
+        if normalized_env == "production" and ciphers is None:
+            raise ValueError(
+                "Explicit cipher suites are required in production. "
+                "Pass TLSConfig.SECURE_CIPHERS or a hardened cipher list."
+            )
+
         # Create SSL context with secure defaults
         # PROTOCOL_TLS_SERVER: Modern protocol selection, server mode
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -103,6 +129,9 @@ class TLSConfig:
             raise
 
         # Configure minimum TLS version
+        if not min_version:
+            raise ValueError("min_version is required and must be set explicitly.")
+
         if min_version not in cls.TLS_VERSIONS:
             raise ValueError(
                 f"Invalid TLS version: {min_version}. "
@@ -111,6 +140,8 @@ class TLSConfig:
 
         context.minimum_version = cls.TLS_VERSIONS[min_version]
         logger.info(f"Minimum TLS version: {min_version}")
+        if normalized_env == "production" and min_version == "TLSv1.2":
+            logger.warning("TLSv1.2 selected for production. Prefer TLSv1.3 where possible.")
 
         # Set secure cipher suite
         cipher_suite = ciphers or cls.SECURE_CIPHERS
@@ -144,12 +175,28 @@ class TLSConfig:
         return context
 
     @classmethod
-    def validate_certificate(cls, cert_file: str) -> dict:
+    def _normalize_environment(cls, environment: Optional[str]) -> str:
+        """Normalize environment values to a lowercase token."""
+
+        if not environment:
+            return "development"
+
+        return environment.strip().lower()
+
+    @classmethod
+    def validate_certificate(
+        cls,
+        cert_file: str,
+        expected_hostnames: Optional[list[str]] = None,
+        environment: str = os.getenv("ENVIRONMENT", "development"),
+    ) -> dict:
         """
         Validate a certificate and extract metadata.
 
         Args:
             cert_file: Path to certificate file
+            expected_hostnames: Hostnames/IPs that must appear in the SAN (enforced in production)
+            environment: Deployment environment (development, staging, production)
 
         Returns:
             Dictionary with certificate metadata:
@@ -160,13 +207,24 @@ class TLSConfig:
             - days_remaining: Days until expiration
             - is_expired: Whether certificate is expired
             - is_self_signed: Whether certificate is self-signed
+            - key_type: Public key algorithm
+            - key_size: Public key size
+            - san_dns: Subject Alternative Name DNS entries
+            - san_ips: Subject Alternative Name IP entries
+            - ocsp_urls: Authority Information Access OCSP responders
+            - crl_urls: CRL Distribution Point URLs
 
         Raises:
             FileNotFoundError: If certificate file doesn't exist
             ssl.SSLError: If certificate is invalid
+            ValueError: If certificate fails compliance checks
         """
         import cryptography.x509
         from cryptography.hazmat.backends import default_backend
+        from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID, NameOID
+        from cryptography.hazmat.primitives.asymmetric import rsa, ec
+
+        normalized_env = cls._normalize_environment(environment)
 
         cert_path = Path(cert_file)
         if not cert_path.exists():
@@ -184,6 +242,77 @@ class TLSConfig:
         issuer = cert.issuer.rfc4514_string()
         not_before = cert.not_valid_before_utc
         not_after = cert.not_valid_after_utc
+        common_name_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+        common_name = common_name_attrs[0].value if common_name_attrs else ""
+        common_name_value = common_name.lower() if common_name else ""
+
+        # Public key validation
+        public_key = cert.public_key()
+        key_size = getattr(public_key, "key_size", None)
+
+        if isinstance(public_key, rsa.RSAPublicKey):
+            key_type = "RSA"
+            if not key_size or key_size < 2048:
+                raise ValueError("RSA key size must be at least 2048 bits.")
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            key_type = f"EC-{public_key.curve.name}"
+            if not key_size or key_size < 256:
+                raise ValueError("Elliptic Curve key size must be at least 256 bits.")
+        else:
+            key_type = type(public_key).__name__
+            raise ValueError(f"Unsupported public key algorithm: {key_type}")
+
+        # SAN parsing
+        try:
+            san_ext = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value
+            san_dns = san_ext.get_values_for_type(cryptography.x509.DNSName)
+            san_ips = san_ext.get_values_for_type(cryptography.x509.IPAddress)
+        except cryptography.x509.ExtensionNotFound:
+            san_dns = []
+            san_ips = []
+
+        san_dns_values = [dns.value.lower() for dns in san_dns]
+        san_ip_values = [ip.exploded for ip in san_ips]
+
+        # Ensure CN is represented in SAN to avoid mismatched hostname validation
+        if common_name_value and common_name_value not in san_dns_values:
+            message = f"Common Name {common_name} is not present in SAN entries."
+            if normalized_env == "production":
+                raise ValueError(message)
+            logger.warning(message)
+        elif not common_name_value:
+            logger.warning("Certificate subject does not include a Common Name.")
+
+        # Hostname enforcement
+        expected = [host.lower() for host in expected_hostnames] if expected_hostnames else []
+        missing_hosts = [
+            host for host in expected
+            if host not in san_dns_values and host not in san_ip_values
+        ]
+        if missing_hosts:
+            message = f"Certificate SAN is missing required hostnames/IPs: {missing_hosts}"
+            if normalized_env == "production":
+                raise ValueError(message)
+            logger.warning(message)
+
+        # OCSP/CRL visibility
+        ocsp_urls = []
+        try:
+            aia_ext = cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_INFORMATION_ACCESS).value
+            for access_description in aia_ext:
+                if access_description.access_method == AuthorityInformationAccessOID.OCSP:
+                    ocsp_urls.append(access_description.access_location.value)
+        except cryptography.x509.ExtensionNotFound:
+            pass
+
+        crl_urls = []
+        try:
+            crl_ext = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value
+            for dp in crl_ext:
+                for name in dp.full_name or []:
+                    crl_urls.append(name.value)
+        except cryptography.x509.ExtensionNotFound:
+            pass
 
         now = datetime.now(not_after.tzinfo)
         days_remaining = (not_after - now).days
@@ -198,6 +327,13 @@ class TLSConfig:
             "days_remaining": days_remaining,
             "is_expired": is_expired,
             "is_self_signed": is_self_signed,
+            "key_type": key_type,
+            "key_size": key_size,
+            "san_dns": san_dns_values,
+            "san_ips": san_ip_values,
+            "common_name": common_name,
+            "ocsp_urls": ocsp_urls,
+            "crl_urls": crl_urls,
         }
 
         # Log warnings
@@ -210,6 +346,18 @@ class TLSConfig:
 
         if is_self_signed:
             logger.warning(f"Certificate is self-signed: {cert_file}")
+            if normalized_env == "production":
+                raise ValueError("Self-signed certificates are forbidden in production.")
+
+        if normalized_env == "production" and not ocsp_urls and not crl_urls:
+            raise ValueError(
+                "Certificate must expose OCSP or CRL endpoints in production to enable revocation checks."
+            )
+        elif not ocsp_urls and not crl_urls:
+            logger.warning(
+                "Certificate does not advertise OCSP or CRL endpoints. "
+                "Revocation status cannot be verified in this environment."
+            )
 
         return metadata
 
@@ -225,6 +373,7 @@ def generate_self_signed_cert(
     common_name: str = "localhost",
     san_dns: Optional[list[str]] = None,
     san_ips: Optional[list[str]] = None,
+    environment: str = os.getenv("ENVIRONMENT", "development"),
 ) -> None:
     """
     Generate a self-signed certificate for development/testing.
@@ -243,6 +392,7 @@ def generate_self_signed_cert(
         common_name: Common name (hostname/domain)
         san_dns: Subject Alternative Names (DNS)
         san_ips: Subject Alternative Names (IP addresses)
+        environment: Deployment environment (blocks production usage)
     """
     from cryptography import x509
     from cryptography.x509.oid import NameOID, ExtensionOID
@@ -251,6 +401,10 @@ def generate_self_signed_cert(
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.backends import default_backend
     import ipaddress
+
+    normalized_env = TLSConfig._normalize_environment(environment)
+    if normalized_env == "production":
+        raise ValueError("Self-signed certificate generation is forbidden in production environments.")
 
     # Create output directory
     cert_path = Path(cert_file)
@@ -371,6 +525,8 @@ def get_ssl_config_for_uvicorn(
     ca_file: Optional[str] = None,
     verify_client: bool = False,
     min_version: str = "TLSv1.2",
+    expected_hostnames: Optional[list[str]] = None,
+    environment: str = os.getenv("ENVIRONMENT", "development"),
 ) -> dict:
     """
     Get SSL configuration dictionary for Uvicorn server.
@@ -381,6 +537,8 @@ def get_ssl_config_for_uvicorn(
         ca_file: Path to CA certificate (for client verification)
         verify_client: Require client certificates (mTLS)
         min_version: Minimum TLS version
+        expected_hostnames: Hostnames/IPs that must be present in the certificate SAN
+        environment: Deployment environment
 
     Returns:
         Dictionary with Uvicorn SSL configuration:
@@ -394,6 +552,12 @@ def get_ssl_config_for_uvicorn(
         >>> ssl_config = get_ssl_config_for_uvicorn("cert.pem", "key.pem")
         >>> uvicorn.run(app, host="0.0.0.0", port=8443, **ssl_config)
     """
+    TLSConfig.validate_certificate(
+        cert_file=cert_file,
+        expected_hostnames=expected_hostnames or [socket.getfqdn()],
+        environment=environment,
+    )
+
     config = {
         "ssl_certfile": cert_file,
         "ssl_keyfile": key_file,
