@@ -137,7 +137,7 @@ class APIKey(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("idx_api_keys_identifier", "key_identifier", unique=True),
+        Index("idx_api_keys_identifier", "key_identifier"),
         Index("idx_api_keys_expiry", "expires_at"),
         Index("idx_api_keys_active_expiry", "is_active", "expires_at"),
     )

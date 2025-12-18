@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
-from typing import Optional
+from typing import Optional, List
 import logging
 
 from .database import get_postgres_session
@@ -114,8 +114,8 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
 # ============================================================================
 
 
-async def _fetch_api_key_candidate(api_key: str, db: AsyncSession) -> Optional[APIKey]:
-    """Fetch a single API key candidate by identifier with expiry enforcement."""
+async def _fetch_api_key_candidates(api_key: str, db: AsyncSession) -> List[APIKey]:
+    """Fetch active, unexpired API key candidates by identifier before bcrypt verification."""
     identifier = derive_api_key_identifier(api_key)
     now = datetime.utcnow()
 
@@ -125,16 +125,16 @@ async def _fetch_api_key_candidate(api_key: str, db: AsyncSession) -> Optional[A
         or_(APIKey.expires_at.is_(None), APIKey.expires_at > now),
     )
     result = await db.execute(stmt)
-    candidate = result.scalar_one_or_none()
-    if candidate:
-        return candidate
+    candidates = list(result.scalars().all())
+    if candidates:
+        return candidates
 
     expired_stmt = select(APIKey.expires_at).where(
         APIKey.key_identifier == identifier,
         APIKey.is_active == True,  # noqa: E712
         APIKey.expires_at.isnot(None),
         APIKey.expires_at <= now,
-    )
+    ).limit(1)
     expired_result = await db.execute(expired_stmt)
     if expired_result.scalar_one_or_none():
         raise HTTPException(
@@ -142,21 +142,22 @@ async def _fetch_api_key_candidate(api_key: str, db: AsyncSession) -> Optional[A
             detail="API key expired",
         )
 
-    return None
+    return []
 
 
 async def _get_valid_api_key(api_key: str, db: AsyncSession) -> Optional[APIKey]:
     """Resolve and verify a single API key record."""
-    candidate = await _fetch_api_key_candidate(api_key, db)
-    if not candidate:
+    candidates = await _fetch_api_key_candidates(api_key, db)
+    if not candidates:
         return None
 
-    if not verify_api_key(api_key, candidate.key_hash):
-        return None
+    for candidate in candidates:
+        if verify_api_key(api_key, candidate.key_hash):
+            candidate.last_used_at = datetime.utcnow()
+            await db.commit()
+            return candidate
 
-    candidate.last_used_at = datetime.utcnow()
-    await db.commit()
-    return candidate
+    return None
 
 
 async def get_user_from_api_key(
