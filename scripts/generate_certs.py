@@ -77,6 +77,11 @@ def main():
 
     args = parser.parse_args()
 
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    if environment == "production":
+        print("❌ Refusing to generate self-signed certificates in production. Provision a CA-signed certificate instead.")
+        return 1
+
     # Prepare file paths
     output_dir = Path(args.output)
     cert_file = str(output_dir / "cert.pem")
@@ -129,7 +134,11 @@ def main():
 
         # Validate the generated certificate
         print("Validating certificate...")
-        metadata = TLSConfig.validate_certificate(cert_file)
+        metadata = TLSConfig.validate_certificate(
+            cert_file,
+            expected_hostnames=[args.domain],
+            environment=environment,
+        )
 
         print()
         print("Certificate details:")
