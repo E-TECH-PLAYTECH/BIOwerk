@@ -172,7 +172,19 @@ python scripts/security_scan.py --deps-only
 **Production secret requirements:**
 - The shipped defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY` are for local development only.
 - Startup will fail in staging/production if either secret still matches the defaults; development emits warnings when defaults are used so you do not ship them by mistake.
-- Always set strong, environment-specific values (32+ characters, generated per environment) via environment variables before deploying.
+- Always set strong, environment-specific values (32+ characters, generated per environment) before deploying.
+- Local/Docker: place secrets in your `.env` file or export them before running services:
+  ```bash
+  export JWT_SECRET_KEY=$(openssl rand -hex 64)
+  export ENCRYPTION_MASTER_KEY=$(openssl rand -hex 64)
+  docker-compose up -d
+  ```
+- Kubernetes/Helm: provide Kubernetes secrets so pods can read them (values align with `k8s/base/secrets.yaml` and Helm `NOTES.txt`):
+  ```bash
+  kubectl create secret generic app-secrets --from-literal=jwt_secret_key=$(openssl rand -hex 64) -n <namespace>
+  kubectl create secret generic gdpr-secrets --from-literal=encryption_master_key=$(openssl rand -hex 64) -n <namespace>
+  helm upgrade --install biowerk ./helm/biowerk -n <namespace>
+  ```
 
 ### 📊 Security Monitoring
 - **Prometheus metrics** for rate limits and auth events
