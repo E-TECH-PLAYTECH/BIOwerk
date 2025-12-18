@@ -12,6 +12,8 @@ Provides comprehensive health and readiness checks with:
 from __future__ import annotations
 
 import asyncio
+import logging
+import random
 import time
 from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime
@@ -23,6 +25,9 @@ from fastapi import FastAPI, Response, status
 from pydantic import BaseModel, Field
 
 from matrix.config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class HealthStatus(str, Enum):
@@ -76,22 +81,39 @@ class HealthChecker:
         self.check_timeout = settings.health_check_timeout
         self.grace_period = settings.health_startup_grace_period
 
+    def _backoff_delay(self, attempt: int) -> float:
+        """Calculate bounded exponential backoff delay."""
+        delay = settings.retry_initial_delay * (settings.retry_exponential_base ** (attempt - 1))
+        delay = min(delay, settings.retry_max_delay)
+
+        if settings.retry_jitter:
+            delay += random.uniform(0, settings.retry_initial_delay)
+
+        return delay
+
+    @staticmethod
+    def _summarize_checks(result: Optional[HealthCheckResponse]) -> str:
+        """Create a concise summary string for component checks."""
+        if not result or not result.checks:
+            return "no checks executed"
+
+        return ", ".join(
+            f"{component.name}={component.status.value}" +
+            (f" ({component.message})" if component.message else "")
+            for component in result.checks
+        )
+
     async def check_postgres(self) -> ComponentHealth:
         """Check PostgreSQL database connectivity."""
-        start = time.time()
         try:
-            from matrix.database import get_db_session
+            from matrix.database import ping_postgres
 
-            # Try to get a database session and execute a simple query
-            async with get_db_session() as session:
-                await session.execute("SELECT 1")
-
-            latency = (time.time() - start) * 1000
+            latency = await ping_postgres()
             return ComponentHealth(
                 name="postgres",
                 status=HealthStatus.HEALTHY,
                 message="Database connection successful",
-                latency_ms=round(latency, 2),
+                latency_ms=latency,
                 metadata={
                     "host": settings.postgres_host,
                     "port": settings.postgres_port,
@@ -99,38 +121,25 @@ class HealthChecker:
                 }
             )
         except Exception as e:
-            latency = (time.time() - start) * 1000
             return ComponentHealth(
                 name="postgres",
                 status=HealthStatus.UNHEALTHY,
                 message=f"Database connection failed: {str(e)}",
-                latency_ms=round(latency, 2),
+                latency_ms=None,
                 metadata={"error": type(e).__name__}
             )
 
     async def check_redis(self) -> ComponentHealth:
         """Check Redis cache connectivity."""
-        start = time.time()
         try:
-            import redis.asyncio as aioredis
+            from matrix.database import ping_redis
 
-            # Create Redis client and test connection
-            redis_client = aioredis.from_url(
-                settings.redis_url,
-                encoding="utf-8",
-                decode_responses=True
-            )
-
-            # Test with PING command
-            await redis_client.ping()
-            await redis_client.close()
-
-            latency = (time.time() - start) * 1000
+            latency = await ping_redis()
             return ComponentHealth(
                 name="redis",
                 status=HealthStatus.HEALTHY,
                 message="Redis connection successful",
-                latency_ms=round(latency, 2),
+                latency_ms=latency,
                 metadata={
                     "host": settings.redis_host,
                     "port": settings.redis_port,
@@ -138,34 +147,25 @@ class HealthChecker:
                 }
             )
         except Exception as e:
-            latency = (time.time() - start) * 1000
             return ComponentHealth(
                 name="redis",
                 status=HealthStatus.UNHEALTHY,
                 message=f"Redis connection failed: {str(e)}",
-                latency_ms=round(latency, 2),
+                latency_ms=None,
                 metadata={"error": type(e).__name__}
             )
 
     async def check_mongodb(self) -> ComponentHealth:
         """Check MongoDB connectivity."""
-        start = time.time()
         try:
-            from motor.motor_asyncio import AsyncIOMotorClient
+            from matrix.database import ping_mongo
 
-            # Create MongoDB client and test connection
-            client = AsyncIOMotorClient(settings.mongo_url)
-
-            # Test with server info command
-            await client.admin.command('ping')
-            client.close()
-
-            latency = (time.time() - start) * 1000
+            latency = await ping_mongo()
             return ComponentHealth(
                 name="mongodb",
                 status=HealthStatus.HEALTHY,
                 message="MongoDB connection successful",
-                latency_ms=round(latency, 2),
+                latency_ms=latency,
                 metadata={
                     "host": settings.mongo_host,
                     "port": settings.mongo_port,
@@ -173,12 +173,11 @@ class HealthChecker:
                 }
             )
         except Exception as e:
-            latency = (time.time() - start) * 1000
             return ComponentHealth(
                 name="mongodb",
                 status=HealthStatus.UNHEALTHY,
                 message=f"MongoDB connection failed: {str(e)}",
-                latency_ms=round(latency, 2),
+                latency_ms=None,
                 metadata={"error": type(e).__name__}
             )
 
@@ -318,7 +317,7 @@ class HealthChecker:
             }
         )
 
-    async def ready(self) -> HealthCheckResponse:
+    async def ready(self, respect_grace_period: bool = True) -> HealthCheckResponse:
         """
         Perform readiness check (readiness probe).
 
@@ -330,7 +329,7 @@ class HealthChecker:
         uptime = time.time() - self.startup_time
 
         # Check if we're still in startup grace period
-        if uptime < self.grace_period:
+        if respect_grace_period and uptime < self.grace_period:
             return HealthCheckResponse(
                 status=HealthStatus.DEGRADED,
                 service=self.service_name,
@@ -402,6 +401,47 @@ class HealthChecker:
             }
         )
 
+    async def wait_for_dependencies(self, max_attempts: Optional[int] = None) -> None:
+        """Block startup until all dependencies respond or raise a fatal error."""
+        attempts = max_attempts or settings.retry_max_attempts
+        last_result: Optional[HealthCheckResponse] = None
+
+        for attempt in range(1, attempts + 1):
+            result = await self.ready(respect_grace_period=False)
+            last_result = result
+
+            if result.status == HealthStatus.HEALTHY:
+                logger.info(
+                    "Dependencies for %s are ready after %d attempt(s)",
+                    self.service_name,
+                    attempt,
+                )
+                return
+
+            delay = self._backoff_delay(attempt)
+            summary = self._summarize_checks(result)
+
+            if attempt >= attempts:
+                logger.error(
+                    "Dependencies for %s failed readiness after %d attempts: %s",
+                    self.service_name,
+                    attempts,
+                    summary,
+                )
+                raise RuntimeError(
+                    f"Dependencies for {self.service_name} are not ready: {summary}"
+                )
+
+            logger.warning(
+                "Dependencies for %s not ready (attempt %d/%d): %s. Retrying in %.2fs",
+                self.service_name,
+                attempt,
+                attempts,
+                summary,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
 
 def setup_health_endpoints(app: FastAPI, service_name: str, version: str = "1.0.0") -> HealthChecker:
     """
@@ -423,6 +463,11 @@ def setup_health_endpoints(app: FastAPI, service_name: str, version: str = "1.0.
         return None
 
     checker = HealthChecker(service_name=service_name, version=version)
+
+    @app.on_event("startup")
+    async def _wait_for_dependencies():
+        """Block application startup until critical dependencies are reachable."""
+        await checker.wait_for_dependencies()
 
     @app.get(
         "/health",
