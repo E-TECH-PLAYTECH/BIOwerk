@@ -7,6 +7,7 @@ This module provides:
 - mTLS (mutual TLS) support
 - Certificate generation utilities for development
 - Production-ready TLS settings
+ - Operational guidance for CA-issued certificate lifecycle and revocation hygiene
 """
 import ssl
 import os
@@ -15,8 +16,31 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
 import logging
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.x509.oid import ExtensionOID
 
 logger = logging.getLogger(__name__)
+
+# Operational reference for platform engineers maintaining TLS in regulated environments.
+CA_CERTIFICATE_OPERATIONS = """
+CA-issued certificate operational checklist:
+- Acquisition: Request server certificates through the approved corporate CA or ACME/PKI automation
+  workflow with the correct common name and SAN entries for every routable hostname and IP.
+- Chain validation: Confirm the full chain is present (server + intermediate(s)) and verifies with
+  `openssl verify -CAfile <trusted-bundle.pem> <server-cert.pem>` before deployment.
+- Key protection: Store private keys in the designated secret manager or HSM-backed path with
+  600/owner-only permissions and documented rotation procedures.
+- Deployment: Ship cert/key/chain as atomic updates, reload listeners, and verify with
+  `openssl s_client -connect host:port -servername <dns> -showcerts`.
+- Revocation hygiene: Enable OCSP stapling where supported and ensure CRL/OCSP URLs in the
+  certificate are reachable from the host. Maintain scheduled jobs (or load balancer settings) to
+  refresh OCSP responses and rotate certificates ahead of expiry.
+- Monitoring: Track expiry, OCSP freshness, and handshake errors in observability dashboards with
+  environment labels (development/staging/production) for rapid triage.
+"""
 
 
 class TLSConfig:
@@ -41,6 +65,146 @@ class TLSConfig:
         "TLSv1.2": ssl.TLSVersion.TLSv1_2,
         "TLSv1.3": ssl.TLSVersion.TLSv1_3,
     }
+    PRODUCTION_ENVIRONMENTS = {"production", "staging"}
+
+    @staticmethod
+    def _normalize_environment(environment: Optional[str]) -> str:
+        """
+        Normalize an environment name, defaulting to DEVELOPMENT semantics.
+
+        The environment influences validation strictness for TLS posture.
+        """
+        return (environment or os.getenv("ENVIRONMENT") or "development").strip().lower()
+
+    @staticmethod
+    def _load_certificate(cert_file: Path) -> x509.Certificate:
+        with open(cert_file, "rb") as f:
+            cert_data = f.read()
+            return x509.load_pem_x509_certificate(cert_data, default_backend())
+
+    @staticmethod
+    def _load_private_key(key_file: Path):
+        with open(key_file, "rb") as f:
+            key_data = f.read()
+            return serialization.load_pem_private_key(
+                key_data, password=None, backend=default_backend()
+            )
+
+    @classmethod
+    def _validate_certificate_strength(
+        cls, cert: x509.Certificate
+    ) -> tuple[list[str], list[str]]:
+        """
+        Validate certificate strength properties and SAN coverage.
+
+        Returns:
+            Tuple of (errors, san_entries)
+        """
+        errors: list[str] = []
+        san_entries: list[str] = []
+        san_extension_present = True
+
+        try:
+            san_extension = cert.extensions.get_extension_for_oid(
+                ExtensionOID.SUBJECT_ALTERNATIVE_NAME
+            ).value
+            for entry in san_extension:
+                san_entries.append(str(entry.value))
+        except x509.ExtensionNotFound:
+            san_extension_present = False
+            errors.append("Certificate is missing a Subject Alternative Name (SAN) extension.")
+
+        if san_extension_present and not san_entries:
+            errors.append("Certificate does not declare any DNS or IP SAN entries.")
+
+        public_key = cert.public_key()
+        if isinstance(public_key, rsa.RSAPublicKey):
+            if public_key.key_size < 2048:
+                errors.append("RSA public key size is below 2048 bits.")
+        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+            if public_key.curve.key_size < 256:
+                errors.append(f"Elliptic curve key size is below 256 bits: {public_key.curve.name}.")
+        else:
+            errors.append(f"Unsupported public key type: {public_key.__class__.__name__}.")
+
+        sig_hash = cert.signature_hash_algorithm
+        if sig_hash and sig_hash.name.lower() in {"md5", "sha1"}:
+            errors.append(f"Weak signature hash algorithm detected: {sig_hash.name}.")
+
+        return errors, san_entries
+
+    @classmethod
+    def _validate_private_key_strength(cls, private_key) -> list[str]:
+        errors: list[str] = []
+
+        if isinstance(private_key, rsa.RSAPrivateKey):
+            if private_key.key_size < 2048:
+                errors.append("RSA private key size must be at least 2048 bits.")
+        elif isinstance(private_key, ec.EllipticCurvePrivateKey):
+            if private_key.curve.key_size < 256:
+                errors.append(f"Elliptic curve private key size is below 256 bits: {private_key.curve.name}.")
+        else:
+            errors.append(f"Unsupported private key type: {private_key.__class__.__name__}.")
+
+        return errors
+
+    @staticmethod
+    def _validate_key_certificate_pair(private_key, cert: x509.Certificate) -> Optional[str]:
+        cert_public_key = cert.public_key()
+        private_public_key = private_key.public_key()
+
+        if isinstance(cert_public_key, rsa.RSAPublicKey) and isinstance(private_public_key, rsa.RSAPublicKey):
+            if cert_public_key.public_numbers() != private_public_key.public_numbers():
+                return "TLS private key does not match the certificate's public key."
+        elif isinstance(cert_public_key, ec.EllipticCurvePublicKey) and isinstance(private_public_key, ec.EllipticCurvePublicKey):
+            cert_numbers = cert_public_key.public_numbers()
+            private_numbers = private_public_key.public_numbers()
+            if cert_numbers.x != private_numbers.x or cert_numbers.y != private_numbers.y:
+                return "Elliptic curve private key does not match the certificate's public key."
+        elif cert_public_key.__class__ != private_public_key.__class__:
+            return (
+                "Certificate public key type does not match private key type: "
+                f"{cert_public_key.__class__.__name__} vs {private_public_key.__class__.__name__}."
+            )
+
+        return None
+
+    @classmethod
+    def _enforce_environmental_tls_policy(
+        cls,
+        environment: str,
+        metadata: dict,
+        key_errors: list[str],
+        cert_errors: list[str],
+        ciphers: Optional[str],
+        min_version: Optional[str],
+    ) -> None:
+        is_prod_like = environment in cls.PRODUCTION_ENVIRONMENTS
+
+        if is_prod_like and not ciphers:
+            raise ValueError(
+                "Production/staging require an explicit TLS cipher suite. "
+                "Set TLS_CIPHERS (or pass ciphers) to a vetted value such as TLSConfig.SECURE_CIPHERS."
+            )
+
+        if is_prod_like and not min_version:
+            raise ValueError(
+                "Production/staging require an explicit minimum TLS version. "
+                "Set TLS_MIN_VERSION (or pass min_version) to TLSv1.2 or TLSv1.3."
+            )
+
+        enforced_errors: list[str] = []
+        if is_prod_like and metadata.get("is_self_signed"):
+            enforced_errors.append("Self-signed certificates are not permitted in staging/production.")
+        enforced_errors.extend(key_errors)
+        enforced_errors.extend(cert_errors)
+
+        if is_prod_like and enforced_errors:
+            raise ValueError(
+                "TLS configuration failed production/staging validation: "
+                + "; ".join(enforced_errors)
+            )
+
 
     @classmethod
     def create_ssl_context(
@@ -149,6 +313,10 @@ class TLSConfig:
             context.set_ciphers(cipher_suite)
             logger.info("Configured secure TLS cipher suite")
         except ssl.SSLError as e:
+            if normalized_env in cls.PRODUCTION_ENVIRONMENTS:
+                raise ValueError(
+                    f"Failed to apply configured TLS cipher suite in {normalized_env}: {e}"
+                ) from e
             logger.warning(f"Failed to set custom ciphers, using defaults: {e}")
 
         # Configure client certificate verification (mTLS)
@@ -230,12 +398,7 @@ class TLSConfig:
         if not cert_path.exists():
             raise FileNotFoundError(f"Certificate file not found: {cert_file}")
 
-        # Load certificate
-        with open(cert_path, "rb") as f:
-            cert_data = f.read()
-            cert = cryptography.x509.load_pem_x509_certificate(
-                cert_data, default_backend()
-            )
+        cert = cert or cls._load_certificate(cert_path)
 
         # Extract metadata
         subject = cert.subject.rfc4514_string()
@@ -360,6 +523,15 @@ class TLSConfig:
             )
 
         return metadata
+
+
+def get_ca_certificate_operations() -> str:
+    """
+    Provide human-readable operational guidance for CA-issued certificates.
+
+    Includes steps for acquisition, chain verification, deployment, and OCSP/CRL hygiene.
+    """
+    return CA_CERTIFICATE_OPERATIONS.strip()
 
 
 def generate_self_signed_cert(

@@ -394,8 +394,17 @@ async def refresh_token(
     context = AuditContext.from_request(request, service_name="auth")
     token_repo = RefreshTokenRepository(db)
     user_repo = UserRepository(db)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
 
-    async def log_refresh_failure(reason: str, token_jti: Optional[str] = None):
+    async def log_refresh_failure(reason: str, token_jti: Optional[str] = None, token_status: Optional[str] = None):
+        request_data = {"refresh_jti": token_jti} if token_jti else {}
+        if user_agent:
+            request_data["user_agent"] = user_agent
+        if client_ip:
+            request_data["ip_address"] = client_ip
+        if token_status:
+            request_data["status"] = token_status
         await audit_logger.log_authentication(
             action="refresh_token",
             status=EventStatus.failure,
@@ -404,7 +413,7 @@ async def refresh_token(
             error_message=reason,
             resource_type="refresh_token",
             resource_id=token_jti,
-            request_data={"refresh_jti": token_jti} if token_jti else None,
+            request_data=request_data or None,
             session=db,
         )
 
@@ -438,42 +447,44 @@ async def refresh_token(
 
     if token_record.user_id != user_id:
         await token_repo.revoke_by_jti(jti, reason="subject_mismatch")
-        await log_refresh_failure("Refresh token subject mismatch", jti)
+        await log_refresh_failure("Refresh token subject mismatch", jti, token_status=token_record.status)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
 
     now = datetime.utcnow()
-    active_token = await token_repo.get_active_by_jti(jti)
+    active_token = await token_repo.get_active_for_user(jti, user_id)
 
     if not active_token:
-        if token_record.revoked_at:
-            await log_refresh_failure("Refresh token revoked", jti)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token has been revoked",
-            )
-
-        if token_record.rotated_at:
-            await log_refresh_failure("Refresh token already rotated", jti)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token already used",
-            )
+        failure_reason = "Refresh token inactive"
+        http_detail = "Invalid refresh token"
 
         if token_record.expires_at <= now:
+            failure_reason = "Refresh token expired"
+            http_detail = "Refresh token expired"
             await token_repo.revoke_by_jti(jti, reason="expired")
-            await log_refresh_failure("Refresh token expired", jti)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token expired",
-            )
+        elif token_record.status and token_record.status != "active":
+            failure_reason = f"Refresh token {token_record.status}"
+            if token_record.status == "revoked":
+                http_detail = "Refresh token has been revoked"
+            elif token_record.status == "rotated":
+                http_detail = "Refresh token already used"
+            elif token_record.status == "expired":
+                http_detail = "Refresh token expired"
+            else:
+                http_detail = f"Refresh token {token_record.status}"
+        elif token_record.revoked_at:
+            failure_reason = "Refresh token revoked"
+            http_detail = "Refresh token has been revoked"
+        elif token_record.rotated_at:
+            failure_reason = "Refresh token already rotated"
+            http_detail = "Refresh token already used"
 
-        await log_refresh_failure("Refresh token inactive", jti)
+        await log_refresh_failure(failure_reason, jti, token_status=token_record.status)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
+            detail=http_detail,
         )
 
     token_record = active_token
@@ -498,8 +509,8 @@ async def refresh_token(
     new_refresh_token, _ = await create_refresh_token(
         data={"sub": user.id},
         db=db,
-        user_agent=request.headers.get("user-agent"),
-        ip_address=request.client.host if request.client else None,
+        user_agent=user_agent,
+        ip_address=client_ip,
         jti=new_jti,
     )
 
@@ -512,7 +523,13 @@ async def refresh_token(
         authentication_method="refresh_token",
         resource_type="refresh_token",
         resource_id=jti,
-        request_data={"refresh_jti": jti, "new_jti": new_jti},
+        request_data={
+            "refresh_jti": jti,
+            "new_jti": new_jti,
+            "previous_status": token_record.status,
+            "user_agent": user_agent,
+            "ip_address": client_ip,
+        },
         session=db,
     )
 

@@ -118,6 +118,7 @@ Matrix uses environment variables for configuration (see `config.py`):
 - `JWT_ALGORITHM` - Algorithm (default: HS256)
 - `ACCESS_TOKEN_EXPIRE_MINUTES` - Access token TTL (default: 30)
 - `REFRESH_TOKEN_EXPIRE_DAYS` - Refresh token TTL (default: 7)
+- **Security hardening**: when `ENVIRONMENT` is anything other than `development`, `dev`, or `local`, startup will refuse to run if `JWT_SECRET_KEY` or `ENCRYPTION_MASTER_KEY` still use the shipped defaults. In development, a warning is emitted so you can rotate secrets before promoting builds.
 
 ### LLM Providers
 - `LLM_PROVIDER` - Default provider: openai, anthropic, deepseek, ollama, local

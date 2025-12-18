@@ -9,6 +9,25 @@ This guide provides a single place to install, start, observe, and maintain BIOw
 - **GNU Make** (optional) for developer workflows
 - **OpenSSL** (or similar) for TLS certificate management
 
+## Mandatory Secret Overrides
+
+BIOwerk ships development-only defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY`. The application now refuses to start in **staging** or **production** when those defaults are present.
+
+- **Development safety net**: when `ENVIRONMENT` is `development`, `dev`, or `local`, startup will log a warning instead of failing, so you notice the defaults before promoting the build.
+- **Local/Docker**: place secrets in `.env` or export them before running the control script or docker-compose:
+  ```bash
+  export JWT_SECRET_KEY=$(openssl rand -hex 64)
+  export ENCRYPTION_MASTER_KEY=$(openssl rand -hex 64)
+  ./scripts/biowerkctl.sh docker-up
+  ```
+- **Kubernetes/Helm**: create Kubernetes secrets (keys match `k8s/base/secrets.yaml`) before installing or upgrading:
+  ```bash
+  kubectl create secret generic app-secrets --from-literal=jwt_secret_key=$(openssl rand -hex 64) -n <namespace>
+  kubectl create secret generic gdpr-secrets --from-literal=encryption_master_key=$(openssl rand -hex 64) -n <namespace>
+  helm upgrade --install biowerk ./helm/biowerk -n <namespace>
+  ```
+  For sealed secrets or external secret stores, map the same keys (`jwt_secret_key`, `encryption_master_key`) into the environment of the services.
+
 ## Unified Control Script
 
 `scripts/biowerkctl.sh` centralizes installation and operational commands.

@@ -1,14 +1,63 @@
 """Database connection management for PostgreSQL, MongoDB, and Redis."""
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
-from motor.motor_asyncio import AsyncIOMotorClient
-from redis.asyncio import Redis
-from typing import AsyncGenerator, Optional
+import asyncio
 import logging
+import random
+import time
+from typing import AsyncGenerator, Optional
+
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import ConfigurationError
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+from sqlalchemy.exc import ArgumentError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _calculate_backoff_delay(attempt: int) -> float:
+    """Calculate bounded exponential backoff delay with optional jitter."""
+    base_delay = settings.retry_initial_delay
+    delay = base_delay * (settings.retry_exponential_base ** (attempt - 1))
+    delay = min(delay, settings.retry_max_delay)
+
+    if settings.retry_jitter:
+        delay += random.uniform(0, base_delay)
+
+    return delay
+
+
+async def _retry_async(operation_name: str, operation, fatal_exceptions: tuple = ()):
+    """Run an async operation with bounded retries and backoff."""
+    last_error = None
+    max_attempts = settings.retry_max_attempts
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await operation()
+        except fatal_exceptions as exc:  # type: ignore[misc]
+            logger.error(
+                "Fatal error while performing %s: %s", operation_name, exc,
+                exc_info=True,
+            )
+            raise
+        except Exception as exc:  # pragma: no cover - defensive logging path
+            last_error = exc
+            delay = _calculate_backoff_delay(attempt)
+            logger.warning(
+                "Attempt %s/%s for %s failed: %s", attempt, max_attempts, operation_name, exc,
+                exc_info=settings.log_level.upper() == "DEBUG",
+            )
+
+            if attempt >= max_attempts:
+                break
+
+            await asyncio.sleep(delay)
+
+    raise RuntimeError(f"{operation_name} failed after {max_attempts} attempts") from last_error
 
 # SQLAlchemy Base for ORM models
 Base = declarative_base()
@@ -132,6 +181,26 @@ async def get_postgres_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
+async def ping_postgres() -> float:
+    """Execute a lightweight PostgreSQL connectivity probe."""
+    session_maker = get_postgres_session_maker()
+    start = time.time()
+    async with session_maker() as session:
+        result = await session.execute("SELECT 1")
+        result.scalar_one()
+    return round((time.time() - start) * 1000, 2)
+
+
+async def ensure_postgres_ready() -> None:
+    """Ensure PostgreSQL is reachable with bounded retries."""
+    latency_ms = await _retry_async(
+        "PostgreSQL connectivity",
+        ping_postgres,
+        fatal_exceptions=(ArgumentError,),
+    )
+    logger.info("PostgreSQL ready (%.2fms)", latency_ms)
+
+
 async def close_postgres():
     """Close PostgreSQL connections."""
     global _pg_engine, _pg_session_maker
@@ -168,6 +237,24 @@ def get_mongo_db():
     return _mongo_db
 
 
+async def ping_mongo() -> float:
+    """Execute a lightweight MongoDB connectivity probe."""
+    client = get_mongo_client()
+    start = time.time()
+    await client.admin.command("ping")
+    return round((time.time() - start) * 1000, 2)
+
+
+async def ensure_mongo_ready() -> None:
+    """Ensure MongoDB is reachable with bounded retries."""
+    latency_ms = await _retry_async(
+        "MongoDB connectivity",
+        ping_mongo,
+        fatal_exceptions=(ConfigurationError,),
+    )
+    logger.info("MongoDB ready (%.2fms)", latency_ms)
+
+
 async def close_mongo():
     """Close MongoDB connections."""
     global _mongo_client, _mongo_db
@@ -193,6 +280,24 @@ def get_redis_client() -> Redis:
         )
         logger.info(f"Redis client created: {settings.redis_host}:{settings.redis_port}")
     return _redis_client
+
+
+async def ping_redis() -> float:
+    """Execute a lightweight Redis connectivity probe."""
+    client = get_redis_client()
+    start = time.time()
+    await client.ping()
+    return round((time.time() - start) * 1000, 2)
+
+
+async def ensure_redis_ready() -> None:
+    """Ensure Redis is reachable with bounded retries."""
+    latency_ms = await _retry_async(
+        "Redis connectivity",
+        ping_redis,
+        fatal_exceptions=(RedisError,),
+    )
+    logger.info("Redis ready (%.2fms)", latency_ms)
 
 
 async def close_redis():
@@ -258,10 +363,12 @@ def get_session_manager(session_type: str = "default"):
 async def init_databases():
     """Initialize all database connections."""
     logger.info("Initializing database connections...")
-    get_postgres_engine()
-    get_mongo_client()
-    get_redis_client()
-    logger.info("All database connections initialized")
+    await asyncio.gather(
+        ensure_postgres_ready(),
+        ensure_mongo_ready(),
+        ensure_redis_ready(),
+    )
+    logger.info("All database connections initialized and verified")
 
 
 async def close_databases():

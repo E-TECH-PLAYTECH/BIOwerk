@@ -137,7 +137,7 @@ class APIKey(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("idx_api_keys_identifier", "key_identifier", unique=True),
+        Index("idx_api_keys_identifier", "key_identifier"),
         Index("idx_api_keys_expiry", "expires_at"),
         Index("idx_api_keys_active_expiry", "is_active", "expires_at"),
     )
@@ -152,11 +152,13 @@ class RefreshToken(Base):
 
     jti = Column(String(36), primary_key=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    exp = Column(DateTime(timezone=True), nullable=False, index=True)
     issued_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     rotated_at = Column(DateTime(timezone=True), nullable=True, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True, index=True)
     revoked_reason = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default="active", server_default="active", index=True)
     replaced_by_jti = Column(String(36), nullable=True, index=True)
     user_agent = Column(Text, nullable=True)
     ip_address = Column(String(45), nullable=True, index=True)
@@ -168,6 +170,7 @@ class RefreshToken(Base):
 
     __table_args__ = (
         Index("idx_refresh_token_user_active", "user_id", "revoked_at", "rotated_at"),
+        Index("idx_refresh_token_status", "status", "expires_at"),
     )
 
     def __repr__(self):

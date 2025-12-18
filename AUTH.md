@@ -83,6 +83,8 @@ curl http://localhost:8100/me \
 | GET | `/api-keys` | List API keys | JWT |
 | DELETE | `/api-keys/{id}` | Revoke API key | JWT |
 
+API keys are stored with a bcrypt hash and a deterministic HMAC-SHA256 identifier. The identifier is indexed and used to select active, non-expired keys **before** bcrypt verification, ensuring expired keys immediately return `401 Unauthorized` without expensive hashing.
+
 ## Usage in Services
 
 ### Protect an Endpoint

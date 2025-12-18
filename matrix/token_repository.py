@@ -45,7 +45,9 @@ class RefreshTokenRepository:
         token = RefreshToken(
             jti=jti,
             user_id=user_id,
+            exp=expires_at,
             expires_at=expires_at,
+            status="active",
             user_agent=user_agent,
             ip_address=ip_address,
         )
@@ -68,6 +70,21 @@ class RefreshTokenRepository:
         now = datetime.utcnow()
         stmt = select(RefreshToken).where(
             RefreshToken.jti == jti,
+            RefreshToken.status == "active",
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.rotated_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_active_for_user(self, jti: str, user_id: str) -> Optional[RefreshToken]:
+        """Fetch an active refresh token scoped to a specific user."""
+        now = datetime.utcnow()
+        stmt = select(RefreshToken).where(
+            RefreshToken.jti == jti,
+            RefreshToken.user_id == user_id,
+            RefreshToken.status == "active",
             RefreshToken.revoked_at.is_(None),
             RefreshToken.rotated_at.is_(None),
             RefreshToken.expires_at > now,
@@ -78,10 +95,15 @@ class RefreshTokenRepository:
     async def revoke_by_jti(self, jti: str, reason: Optional[str] = None) -> bool:
         """Revoke a refresh token by JTI if it is not already revoked."""
         now = datetime.utcnow()
+        status_value = reason or "revoked"
         stmt = (
             update(RefreshToken)
             .where(RefreshToken.jti == jti, RefreshToken.revoked_at.is_(None))
-            .values(revoked_at=now, revoked_reason=reason or "revoked")
+            .values(
+                revoked_at=now,
+                revoked_reason=reason or "revoked",
+                status=status_value,
+            )
         )
         result = await self.db.execute(stmt)
         if result.rowcount:
@@ -92,10 +114,15 @@ class RefreshTokenRepository:
     async def revoke_tokens_for_user(self, user_id: str, reason: Optional[str] = None) -> int:
         """Revoke all active refresh tokens for a user."""
         now = datetime.utcnow()
+        status_value = reason or "revoked"
         stmt = (
             update(RefreshToken)
             .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-            .values(revoked_at=now, revoked_reason=reason or "revoked")
+            .values(
+                revoked_at=now,
+                revoked_reason=reason or "revoked",
+                status=status_value,
+            )
         )
         result = await self.db.execute(stmt)
         await self.db.commit()
@@ -121,9 +148,11 @@ class RefreshTokenRepository:
         token.last_used_at = now
         token.rotated_at = now
         token.replaced_by_jti = replaced_by_jti
+        token.status = "rotated"
         if revoke:
             token.revoked_at = token.revoked_at or now
             token.revoked_reason = token.revoked_reason or "rotated"
+            token.status = "revoked"
 
         if commit:
             await self.db.commit()
