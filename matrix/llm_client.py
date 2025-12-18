@@ -1,12 +1,15 @@
 """LLM client utility for unified access to OpenAI, Anthropic, DeepSeek, Ollama, and Local models."""
+import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 import ollama
 from matrix.config import settings
+from matrix.resilience import CircuitBreaker, retry_with_backoff
+from matrix import budget_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,23 @@ class LLMClient:
     def __init__(self):
         """Initialize LLM clients based on configuration."""
         self.provider = settings.llm_provider.lower()
+
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
+        self._retry_enabled = settings.retry_enabled
+
+        if settings.circuit_breaker_enabled:
+            circuit_kwargs = {
+                "failure_threshold": settings.circuit_breaker_failure_threshold,
+                "success_threshold": settings.circuit_breaker_success_threshold,
+                "timeout": settings.circuit_breaker_timeout,
+                "failure_rate_threshold": settings.circuit_breaker_failure_rate_threshold,
+                "window_size": settings.circuit_breaker_window_size,
+            }
+            for provider_name in ["openai", "anthropic", "deepseek", "ollama", "local"]:
+                self._circuit_breakers[provider_name] = CircuitBreaker(
+                    service_name=f"llm-{provider_name}",
+                    **circuit_kwargs
+                )
 
         # Initialize OpenAI client
         if settings.openai_api_key:
@@ -62,6 +82,70 @@ class LLMClient:
         if self.provider == "local" and LLAMA_CPP_AVAILABLE:
             self._load_local_model()
 
+    def _get_retry_config(self, provider: str) -> Optional[dict]:
+        """Build retry configuration for provider calls."""
+        if not self._retry_enabled:
+            return None
+
+        return {
+            "max_attempts": settings.retry_max_attempts,
+            "initial_delay": settings.retry_initial_delay,
+            "max_delay": settings.retry_max_delay,
+            "exponential_base": settings.retry_exponential_base,
+            "jitter": settings.retry_jitter,
+            "service_name": f"llm-{provider}",
+        }
+
+    def _get_provider_timeout(self, provider: str, override: Optional[float] = None) -> float:
+        """Get the timeout to apply for a specific provider call."""
+        if override is not None:
+            return float(override)
+
+        provider = (provider or self.provider).lower()
+        if provider == "openai":
+            return float(settings.openai_timeout)
+        if provider == "anthropic":
+            return float(settings.anthropic_timeout)
+        if provider == "deepseek":
+            return float(settings.deepseek_timeout)
+        if provider == "ollama":
+            return float(settings.ollama_timeout)
+        if provider == "local":
+            return float(settings.service_timeout_agent)
+        return float(settings.service_timeout_default)
+
+    def _get_default_model(self, provider: str) -> str:
+        """Resolve default model name for a provider."""
+        provider = provider.lower()
+        if provider == "openai":
+            return settings.openai_model
+        if provider == "anthropic":
+            return settings.anthropic_model
+        if provider == "deepseek":
+            return settings.deepseek_model
+        if provider == "ollama":
+            return settings.ollama_model
+        if provider == "local":
+            return settings.local_model_name
+        return "unknown"
+
+    async def _execute_with_resilience(
+        self,
+        provider: str,
+        func: Callable[[], Any]
+    ) -> Any:
+        """Apply circuit breaker and retry policies around the provider call."""
+        retry_config = self._get_retry_config(provider)
+        circuit_breaker = self._circuit_breakers.get(provider)
+
+        if circuit_breaker and retry_config:
+            return await circuit_breaker.call(retry_with_backoff, func, **retry_config)
+        if circuit_breaker:
+            return await circuit_breaker.call(func)
+        if retry_config:
+            return await retry_with_backoff(func, **retry_config)
+        return await func()
+
     def _load_local_model(self):
         """Load local GGUF model from disk."""
         model_path = Path(settings.local_model_path) / settings.local_model_name / settings.local_model_file
@@ -93,7 +177,8 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        json_mode: bool = False
+        json_mode: bool = False,
+        timeout: Optional[float] = None
     ) -> str:
         """
         Generate a chat completion using the configured LLM provider.
@@ -106,6 +191,7 @@ class LLMClient:
             provider: Override default provider ('openai', 'anthropic', 'deepseek', 'ollama', or 'local')
             model: Override default model
             json_mode: Enable JSON response mode
+            timeout: Optional per-call timeout override in seconds
 
         Returns:
             Generated text response
@@ -114,35 +200,62 @@ class LLMClient:
             ValueError: If provider is not configured or invalid
             Exception: If API call fails
         """
-        provider = provider or self.provider
+        provider = (provider or self.provider).lower()
+        model_name = model or self._get_default_model(provider)
+        timeout_seconds = self._get_provider_timeout(provider, timeout)
+        start_time = time.time()
+        outcome = "success"
 
-        try:
+        async def _dispatch():
             if provider == "openai":
                 return await self._openai_completion(
-                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
                 )
-            elif provider == "anthropic":
+            if provider == "anthropic":
                 return await self._anthropic_completion(
-                    messages, system_prompt, temperature, max_tokens, model
+                    messages, system_prompt, temperature, max_tokens, model_name
                 )
-            elif provider == "deepseek":
+            if provider == "deepseek":
                 return await self._deepseek_completion(
-                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
                 )
-            elif provider == "ollama":
+            if provider == "ollama":
                 return await self._ollama_completion(
-                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
                 )
-            elif provider == "local":
+            if provider == "local":
                 return await self._local_completion(
-                    messages, system_prompt, temperature, max_tokens, model, json_mode
+                    messages, system_prompt, temperature, max_tokens, model_name, json_mode
                 )
-            else:
-                raise ValueError(f"Invalid LLM provider: {provider}")
 
+            raise ValueError(f"Invalid LLM provider: {provider}")
+
+        try:
+            return await self._execute_with_resilience(
+                provider,
+                lambda: asyncio.wait_for(_dispatch(), timeout=timeout_seconds)
+            )
+        except asyncio.TimeoutError as e:
+            outcome = "timeout"
+            budget_metrics.record_provider_error(provider, model_name, "TimeoutError")
+            logger.error(
+                "LLM completion timed out",
+                exc_info=True,
+                extra={"provider": provider, "model": model_name, "timeout_seconds": timeout_seconds}
+            )
+            raise e
         except Exception as e:
-            logger.error(f"LLM completion failed: {str(e)}", exc_info=True)
+            outcome = "error"
+            budget_metrics.record_provider_error(provider, model_name, type(e).__name__)
+            logger.error(
+                f"LLM completion failed: {str(e)}",
+                exc_info=True,
+                extra={"provider": provider, "model": model_name}
+            )
             raise
+        finally:
+            duration = time.time() - start_time
+            budget_metrics.record_provider_latency(provider, model_name, duration, outcome)
 
     async def _openai_completion(
         self,
