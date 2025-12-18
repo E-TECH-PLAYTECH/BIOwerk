@@ -11,6 +11,7 @@ DEFAULT_ENCRYPTION_MASTER_KEY = "change-this-master-key-in-production-min-32-cha
 
 _logger = logging.getLogger(__name__)
 _dev_secret_warnings_emitted: set[str] = set()
+_development_envs = {"development", "dev", "local"}
 
 
 def _emit_dev_secret_warning(secret_name: str) -> None:
@@ -255,8 +256,8 @@ class Settings(BaseSettings):
         normalized_env = (self.environment or "development").strip().lower()
         production_like_envs = {"production", "staging"}
         defaults = {
-            "jwt_secret_key": (self.jwt_secret_key, DEFAULT_JWT_SECRET),
-            "encryption_master_key": (self.encryption_master_key, DEFAULT_ENCRYPTION_MASTER_KEY),
+            "jwt_secret_key": (self.jwt_secret_key.strip(), DEFAULT_JWT_SECRET),
+            "encryption_master_key": (self.encryption_master_key.strip(), DEFAULT_ENCRYPTION_MASTER_KEY),
         }
 
         defaulted_secrets = [name for name, (value, default) in defaults.items() if value == default]
@@ -269,7 +270,7 @@ class Settings(BaseSettings):
                 "Override JWT_SECRET_KEY and ENCRYPTION_MASTER_KEY with strong, per-environment secrets before deploying."
             )
 
-        if normalized_env == "development" and defaulted_secrets:
+        if normalized_env in _development_envs and defaulted_secrets:
             for secret in defaulted_secrets:
                 _emit_dev_secret_warning(secret)
 
