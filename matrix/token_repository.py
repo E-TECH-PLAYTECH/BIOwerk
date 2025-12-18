@@ -128,6 +128,56 @@ class RefreshTokenRepository:
         await self.db.commit()
         return result.rowcount
 
+    async def rotate_active_token(
+        self,
+        jti: str,
+        user_id: str,
+        replaced_by_jti: str,
+        reason: str = "rotated",
+        commit: bool = False,
+    ) -> Optional[RefreshToken]:
+        """
+        Atomically rotate an active refresh token and mark it revoked.
+
+        Args:
+            jti: Unique identifier of the token being rotated.
+            user_id: Owner of the refresh token to prevent cross-user misuse.
+            replaced_by_jti: Identifier of the newly issued refresh token.
+            reason: Reason to store with the revocation (default: rotated).
+            commit: Whether to commit immediately. Defaults to False to allow
+                batching with the issuance of the replacement token.
+        """
+        now = datetime.utcnow()
+        stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.jti == jti,
+                RefreshToken.user_id == user_id,
+                RefreshToken.status == "active",
+                RefreshToken.revoked_at.is_(None),
+                RefreshToken.rotated_at.is_(None),
+                RefreshToken.expires_at > now,
+            )
+            .values(
+                rotated_at=now,
+                revoked_at=now,
+                revoked_reason=reason,
+                status="revoked",
+                replaced_by_jti=replaced_by_jti,
+                last_used_at=now,
+            )
+        )
+        result = await self.db.execute(stmt)
+        if not result.rowcount:
+            return None
+
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
+
+        return await self.get_by_jti(jti)
+
     async def mark_rotated(
         self,
         token: RefreshToken,
