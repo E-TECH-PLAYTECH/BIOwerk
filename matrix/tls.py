@@ -20,7 +20,7 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID
+from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID, NameOID
 
 logger = logging.getLogger(__name__)
 
@@ -29,20 +29,27 @@ CA_CERTIFICATE_OPERATIONS = """
 CA-issued certificate operational checklist:
 - Acquisition: Request server certificates through the approved corporate CA or ACME/PKI automation
   workflow with the correct common name and SAN entries for every routable hostname and IP.
+- Pre-flight strength checks: Verify private keys are >=2048-bit RSA or >=256-bit EC and that SAN
+  coverage matches every hostname the service presents. Reject self-signed material for staging and
+  production.
 - Chain validation: Confirm the full chain is present (server + intermediate(s)) and verifies with
-  `openssl verify -CAfile <trusted-bundle.pem> <server-cert.pem>` before deployment.
+  `openssl verify -CAfile <trusted-bundle.pem> <server-cert.pem>` before deployment. Record the
+  issuing CA policy OID in runbooks for audit traceability.
 - Key protection: Store private keys in the designated secret manager or HSM-backed path with
   600/owner-only permissions and documented rotation procedures.
 - Deployment: Ship cert/key/chain as atomic updates, reload listeners, and verify with
-  `openssl s_client -connect host:port -servername <dns> -showcerts`.
+  `openssl s_client -connect host:port -servername <dns> -showcerts -alpn h2 -status` to confirm the
+  negotiated cipher, minimum TLS version, and OCSP stapling response.
 - Revocation hygiene: Enable OCSP stapling where supported and ensure CRL/OCSP URLs in the
   certificate are reachable from the host. Maintain scheduled jobs (or load balancer settings) to
   refresh OCSP responses and rotate certificates ahead of expiry. If your load balancer terminates
   TLS, confirm OCSP stapling is enabled and that CRL distribution endpoints are reachable during
-  health checks.
+  health checks. For manual checks, run `openssl ocsp -issuer <issuer.pem> -cert <server.pem> -url
+  <ocsp_url>` and `crlutil --verify <crl_url>` (or equivalent) from the serving host or LB node.
 - Monitoring: Track expiry, OCSP freshness, and handshake errors in observability dashboards with
   environment labels (development/staging/production) for rapid triage. Alert when certs fall back
-  to weak cipher bundles or below the mandated minimum TLS version.
+  to weak cipher bundles or below the mandated minimum TLS version, and page on stapling failures
+  that exceed SLOs.
 """
 
 
@@ -228,13 +235,13 @@ class TLSConfig:
     ) -> None:
         is_prod_like = environment in cls.PRODUCTION_ENVIRONMENTS
 
-        if is_prod_like and not ciphers:
+        if is_prod_like and (not ciphers or not str(ciphers).strip()):
             raise ValueError(
                 "Production/staging require an explicit TLS cipher suite. "
                 "Set TLS_CIPHERS (or pass ciphers) to a vetted value such as TLSConfig.SECURE_CIPHERS."
             )
 
-        if is_prod_like and not min_version:
+        if is_prod_like and (not min_version or not str(min_version).strip()):
             raise ValueError(
                 "Production/staging require an explicit minimum TLS version. "
                 "Set TLS_MIN_VERSION (or pass min_version) to TLSv1.2 or TLSv1.3."
@@ -326,7 +333,12 @@ class TLSConfig:
         normalized_env = cls._normalize_environment(environment)
 
         cert = cls._load_certificate(cert_path)
-        metadata = cls.validate_certificate(cert_file, cert=cert)
+        metadata = cls.validate_certificate(
+            cert_file,
+            cert=cert,
+            expected_hostnames=expected_hostnames,
+            environment=normalized_env,
+        )
         cert_strength_errors = list(metadata.get("strength_errors", []))
         private_key = cls._load_private_key(key_path)
         key_strength_errors = cls._validate_private_key_strength(private_key)
@@ -427,18 +439,10 @@ class TLSConfig:
         return context
 
     @classmethod
-    def _normalize_environment(cls, environment: Optional[str]) -> str:
-        """Normalize environment values to a lowercase token."""
-
-        if not environment:
-            return "development"
-
-        return environment.strip().lower()
-
-    @classmethod
     def validate_certificate(
         cls,
         cert_file: str,
+        cert: Optional[x509.Certificate] = None,
         expected_hostnames: Optional[list[str]] = None,
         environment: str = os.getenv("ENVIRONMENT", "development"),
     ) -> dict:
@@ -471,12 +475,8 @@ class TLSConfig:
             ssl.SSLError: If certificate is invalid
             ValueError: If certificate fails compliance checks
         """
-        import cryptography.x509
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.x509.oid import ExtensionOID, AuthorityInformationAccessOID, NameOID
-        from cryptography.hazmat.primitives.asymmetric import rsa, ec
-
         normalized_env = cls._normalize_environment(environment)
+        is_prod_like = normalized_env in cls.PRODUCTION_ENVIRONMENTS
 
         cert_path = Path(cert_file)
         if not cert_path.exists():
@@ -494,6 +494,11 @@ class TLSConfig:
         common_name_attrs = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
         common_name = common_name_attrs[0].value if common_name_attrs else ""
         common_name_value = common_name.lower() if common_name else ""
+        if cert_strength_errors:
+            message = f"Certificate strength/SAN validation errors: {'; '.join(cert_strength_errors)}"
+            if is_prod_like:
+                raise ValueError(message)
+            logger.warning(message)
 
         # Public key validation
         public_key = cert.public_key()
@@ -514,9 +519,9 @@ class TLSConfig:
         # SAN parsing
         try:
             san_ext = cert.extensions.get_extension_for_oid(ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value
-            san_dns = san_ext.get_values_for_type(cryptography.x509.DNSName)
-            san_ips = san_ext.get_values_for_type(cryptography.x509.IPAddress)
-        except cryptography.x509.ExtensionNotFound:
+            san_dns = san_ext.get_values_for_type(x509.DNSName)
+            san_ips = san_ext.get_values_for_type(x509.IPAddress)
+        except x509.ExtensionNotFound:
             san_dns = []
             san_ips = []
 
@@ -526,7 +531,7 @@ class TLSConfig:
         # Ensure CN is represented in SAN to avoid mismatched hostname validation
         if common_name_value and common_name_value not in san_dns_values:
             message = f"Common Name {common_name} is not present in SAN entries."
-            if normalized_env == "production":
+            if is_prod_like:
                 raise ValueError(message)
             logger.warning(message)
         elif not common_name_value:
@@ -540,28 +545,9 @@ class TLSConfig:
         ]
         if missing_hosts:
             message = f"Certificate SAN is missing required hostnames/IPs: {missing_hosts}"
-            if normalized_env == "production":
+            if is_prod_like:
                 raise ValueError(message)
             logger.warning(message)
-
-        # OCSP/CRL visibility
-        ocsp_urls = []
-        try:
-            aia_ext = cert.extensions.get_extension_for_oid(ExtensionOID.AUTHORITY_INFORMATION_ACCESS).value
-            for access_description in aia_ext:
-                if access_description.access_method == AuthorityInformationAccessOID.OCSP:
-                    ocsp_urls.append(access_description.access_location.value)
-        except cryptography.x509.ExtensionNotFound:
-            pass
-
-        crl_urls = []
-        try:
-            crl_ext = cert.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value
-            for dp in crl_ext:
-                for name in dp.full_name or []:
-                    crl_urls.append(name.value)
-        except cryptography.x509.ExtensionNotFound:
-            pass
 
         now = datetime.now(not_after.tzinfo)
         days_remaining = (not_after - now).days
@@ -598,12 +584,12 @@ class TLSConfig:
 
         if is_self_signed:
             logger.warning(f"Certificate is self-signed: {cert_file}")
-            if normalized_env == "production":
-                raise ValueError("Self-signed certificates are forbidden in production.")
+            if is_prod_like:
+                raise ValueError("Self-signed certificates are forbidden in production or staging.")
 
-        if normalized_env == "production" and not ocsp_urls and not crl_urls:
+        if is_prod_like and not ocsp_urls and not crl_urls:
             raise ValueError(
-                "Certificate must expose OCSP or CRL endpoints in production to enable revocation checks."
+                "Certificate must expose OCSP or CRL endpoints in staging/production to enable revocation checks."
             )
         elif not ocsp_urls and not crl_urls:
             logger.warning(
