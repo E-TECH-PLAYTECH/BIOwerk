@@ -504,7 +504,19 @@ async def refresh_token(
     context.username = user.username
 
     new_jti = RefreshTokenRepository.generate_jti()
-    await token_repo.mark_rotated(token_record, replaced_by_jti=new_jti, revoke=True, commit=False)
+    rotated = await token_repo.rotate_active_token(
+        jti=jti,
+        user_id=user_id,
+        replaced_by_jti=new_jti,
+        commit=False,
+    )
+
+    if not rotated:
+        await log_refresh_failure("Refresh token became inactive during rotation", jti, token_status=token_record.status)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token",
+        )
 
     new_refresh_token, _ = await create_refresh_token(
         data={"sub": user.id},

@@ -99,6 +99,7 @@ sys.modules["matrix.db_models"] = db_models_stub
 
 token_repository = importlib.import_module("matrix.token_repository")
 RefreshTokenRepository = token_repository.RefreshTokenRepository
+matrix_auth = importlib.import_module("matrix.auth")
 
 
 async def _build_session():
@@ -154,6 +155,81 @@ def test_refresh_token_rotation_marks_old_token():
             assert rotated.replaced_by_jti == "jti-new"
             assert rotated.status == "revoked"
             assert rotated.revoked_reason == "rotated"
+        finally:
+            await session.close()
+            await engine.dispose()
+
+    import asyncio
+    asyncio.run(_run())
+
+
+def test_rotate_active_token_atomic_and_single_use():
+    async def _run():
+        engine, session = await _build_session()
+        try:
+            repo = RefreshTokenRepository(session)
+            user_id = "user-rotation-atomic"
+            expires_at = datetime.utcnow() + timedelta(days=1)
+
+            await repo.create_token(user_id=user_id, jti="atomic-jti-old", expires_at=expires_at, commit=False)
+
+            rotated = await repo.rotate_active_token(
+                jti="atomic-jti-old",
+                user_id=user_id,
+                replaced_by_jti="atomic-jti-new",
+                commit=True,
+            )
+            assert rotated is not None
+            assert rotated.status == "revoked"
+            assert rotated.revoked_reason == "rotated"
+            assert rotated.replaced_by_jti == "atomic-jti-new"
+            assert rotated.rotated_at is not None
+            first_revocation_time = rotated.revoked_at
+
+            double_rotate = await repo.rotate_active_token(
+                jti="atomic-jti-old",
+                user_id=user_id,
+                replaced_by_jti="atomic-jti-newer",
+                commit=True,
+            )
+            assert double_rotate is None
+
+            persisted = await repo.get_by_jti("atomic-jti-old")
+            assert persisted.revoked_at == first_revocation_time
+            assert persisted.status == "revoked"
+        finally:
+            await session.close()
+            await engine.dispose()
+
+    import asyncio
+    asyncio.run(_run())
+
+
+def test_create_refresh_token_persists_jti_and_metadata():
+    async def _run():
+        engine, session = await _build_session()
+        try:
+            data = {"sub": "user-create-jti"}
+            refresh_token, jti = await matrix_auth.create_refresh_token(
+                data=data,
+                db=session,
+                user_agent="pytest-agent",
+                ip_address="127.0.0.1",
+            )
+
+            payload = matrix_auth.decode_token(refresh_token)
+            assert payload is not None
+            assert payload.get("jti") == jti
+            assert payload.get("type") == "refresh"
+            assert payload.get("sub") == data["sub"]
+
+            repo = RefreshTokenRepository(session)
+            record = await repo.get_by_jti(jti)
+            assert record is not None
+            assert record.user_id == data["sub"]
+            assert record.user_agent == "pytest-agent"
+            assert record.ip_address == "127.0.0.1"
+            assert record.exp >= datetime.utcnow()
         finally:
             await session.close()
             await engine.dispose()
