@@ -3,27 +3,45 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const axios = require('axios');
 const fs = require('fs');
+const {
+  translate: t,
+  resolveLocale
+} = require('./locales');
 
 let mainWindow = null;
 let tray = null;
 let dockerProcess = null;
+let currentLocale = resolveLocale(app.getLocale());
 
 // Application paths
 const isDev = !app.isPackaged;
 const appPath = isDev ? path.join(__dirname, '..', '..') : path.join(process.resourcesPath, 'app');
 const composePath = path.join(appPath, 'docker-compose.yml');
 
+function getString(key, variables) {
+  return t(currentLocale, key, variables);
+}
+
 // Service health status
 let servicesStatus = {
-  mesh: { name: 'Mesh Gateway', url: 'http://localhost:8080/health', status: 'stopped' },
-  osteon: { name: 'Osteon (Writer)', url: 'http://localhost:8001/health', status: 'stopped' },
-  myocyte: { name: 'Myocyte (Spreadsheet)', url: 'http://localhost:8002/health', status: 'stopped' },
-  synapse: { name: 'Synapse (Presentation)', url: 'http://localhost:8003/health', status: 'stopped' },
-  circadian: { name: 'Circadian (Scheduler)', url: 'http://localhost:8004/health', status: 'stopped' },
-  nucleus: { name: 'Nucleus (Director)', url: 'http://localhost:8005/health', status: 'stopped' },
-  grafana: { name: 'Grafana (Monitoring)', url: 'http://localhost:3000/api/health', status: 'stopped' },
-  prometheus: { name: 'Prometheus', url: 'http://localhost:9090/-/healthy', status: 'stopped' }
+  mesh: { id: 'mesh', translationKey: 'services.mesh', url: 'http://localhost:8080/health', status: 'stopped' },
+  osteon: { id: 'osteon', translationKey: 'services.osteon', url: 'http://localhost:8001/health', status: 'stopped' },
+  myocyte: { id: 'myocyte', translationKey: 'services.myocyte', url: 'http://localhost:8002/health', status: 'stopped' },
+  synapse: { id: 'synapse', translationKey: 'services.synapse', url: 'http://localhost:8003/health', status: 'stopped' },
+  circadian: { id: 'circadian', translationKey: 'services.circadian', url: 'http://localhost:8004/health', status: 'stopped' },
+  nucleus: { id: 'nucleus', translationKey: 'services.nucleus', url: 'http://localhost:8005/health', status: 'stopped' },
+  grafana: { id: 'grafana', translationKey: 'services.grafana', url: 'http://localhost:3000/api/health', status: 'stopped' },
+  prometheus: { id: 'prometheus', translationKey: 'services.prometheus', url: 'http://localhost:9090/-/healthy', status: 'stopped' }
 };
+
+function sendOperationStatus(status, messageKey) {
+  if (!mainWindow) return;
+  mainWindow.webContents.send('operation-status', {
+    status,
+    messageKey,
+    message: getString(messageKey)
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -36,7 +54,7 @@ function createWindow() {
     },
     backgroundColor: '#1e1e1e',
     show: false,
-    title: 'BIOwerk Control Panel'
+    title: getString('app.title')
   });
 
   mainWindow.loadFile('index.html');
@@ -45,6 +63,7 @@ function createWindow() {
     mainWindow.show();
     checkDockerInstalled();
     checkServicesStatus();
+    mainWindow.webContents.send('compose-path', composePath);
   });
 
   mainWindow.on('close', (event) => {
@@ -64,42 +83,51 @@ function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
   tray = new Tray(iconPath);
 
-  const contextMenu = Menu.buildFromTemplate([
+  tray.setToolTip(getString('app.title'));
+  tray.setContextMenu(buildTrayMenu());
+
+  tray.on('click', () => {
+    mainWindow.show();
+  });
+}
+
+function buildTrayMenu() {
+  return Menu.buildFromTemplate([
     {
-      label: 'Show Control Panel',
+      label: getString('app.title'),
       click: () => {
         mainWindow.show();
       }
     },
     { type: 'separator' },
     {
-      label: 'Start Services',
+      label: getString('buttons.start'),
       click: () => {
         startServices();
       }
     },
     {
-      label: 'Stop Services',
+      label: getString('buttons.stop'),
       click: () => {
         stopServices();
       }
     },
     { type: 'separator' },
     {
-      label: 'Open API Docs',
+      label: getString('quickLinks.apiDocs'),
       click: () => {
         shell.openExternal('http://localhost:8080/docs');
       }
     },
     {
-      label: 'Open Grafana',
+      label: getString('quickLinks.grafana'),
       click: () => {
         shell.openExternal('http://localhost:3000');
       }
     },
     { type: 'separator' },
     {
-      label: 'Quit',
+      label: getString('app.quit'),
       click: () => {
         app.isQuitting = true;
         stopServices().then(() => {
@@ -108,13 +136,6 @@ function createTray() {
       }
     }
   ]);
-
-  tray.setToolTip('BIOwerk Suite');
-  tray.setContextMenu(contextMenu);
-
-  tray.on('click', () => {
-    mainWindow.show();
-  });
 }
 
 // Check if Docker is installed
@@ -128,10 +149,12 @@ function checkDockerInstalled() {
 
       dialog.showMessageBox(mainWindow, {
         type: 'error',
-        title: 'Docker Not Found',
-        message: 'Docker is required to run BIOwerk',
-        detail: 'Please install Docker Desktop from https://docker.com',
-        buttons: ['Download Docker', 'Cancel']
+        title: getString('alerts.dockerMissingTitle'),
+        message: getString('alerts.dockerNotInstalled'),
+        detail: getString('alerts.dockerDialogDetail'),
+        buttons: [getString('alerts.dockerDownload'), getString('alerts.dialogCancel')],
+        defaultId: 0,
+        cancelId: 1
       }).then((result) => {
         if (result.response === 0) {
           shell.openExternal('https://www.docker.com/products/docker-desktop');
@@ -183,8 +206,10 @@ async function checkServicesStatus() {
 // Start Docker Compose services
 function startServices() {
   if (!fs.existsSync(composePath)) {
-    dialog.showErrorBox('Configuration Error',
-      `docker-compose.yml not found at ${composePath}`);
+    dialog.showErrorBox(
+      getString('alerts.composeMissingTitle'),
+      getString('alerts.composeMissingBody', { path: composePath })
+    );
     return Promise.reject(new Error('docker-compose.yml not found'));
   }
 
@@ -196,18 +221,15 @@ function startServices() {
       fs.copyFileSync(envExamplePath, envPath);
       dialog.showMessageBox(mainWindow, {
         type: 'info',
-        title: 'Configuration Created',
-        message: 'A default configuration file has been created',
-        detail: 'Please review the .env file and restart the application if you need to change any settings.'
+        title: getString('alerts.envCreatedTitle'),
+        message: getString('alerts.envCreatedBody'),
+        detail: getString('alerts.envCreatedDetail')
       });
     }
   }
 
   return new Promise((resolve, reject) => {
-    mainWindow.webContents.send('operation-status', {
-      status: 'starting',
-      message: 'Starting BIOwerk services...'
-    });
+    sendOperationStatus('starting', 'alerts.startStarting');
 
     const compose = spawn('docker', ['compose', 'up', '-d'], {
       cwd: appPath,
@@ -228,10 +250,7 @@ function startServices() {
 
     compose.on('close', (code) => {
       if (code === 0) {
-        mainWindow.webContents.send('operation-status', {
-          status: 'started',
-          message: 'Services started successfully'
-        });
+        sendOperationStatus('started', 'alerts.startSuccess');
 
         // Wait a bit for services to initialize
         setTimeout(() => {
@@ -240,11 +259,7 @@ function startServices() {
 
         resolve();
       } else {
-        mainWindow.webContents.send('operation-status', {
-          status: 'error',
-          message: 'Failed to start services',
-          details: output
-        });
+        sendOperationStatus('error', 'alerts.startFailure');
         reject(new Error('Failed to start services'));
       }
     });
@@ -254,10 +269,7 @@ function startServices() {
 // Stop Docker Compose services
 function stopServices() {
   return new Promise((resolve, reject) => {
-    mainWindow.webContents.send('operation-status', {
-      status: 'stopping',
-      message: 'Stopping BIOwerk services...'
-    });
+    sendOperationStatus('stopping', 'alerts.stopStopping');
 
     const compose = spawn('docker', ['compose', 'down'], {
       cwd: appPath,
@@ -266,17 +278,11 @@ function stopServices() {
 
     compose.on('close', (code) => {
       if (code === 0) {
-        mainWindow.webContents.send('operation-status', {
-          status: 'stopped',
-          message: 'Services stopped successfully'
-        });
+        sendOperationStatus('stopped', 'alerts.stopSuccess');
         checkServicesStatus();
         resolve();
       } else {
-        mainWindow.webContents.send('operation-status', {
-          status: 'error',
-          message: 'Failed to stop services'
-        });
+        sendOperationStatus('error', 'alerts.stopFailure');
         reject(new Error('Failed to stop services'));
       }
     });
@@ -349,6 +355,21 @@ ipcMain.on('open-url', (event, url) => {
 ipcMain.on('open-config', () => {
   const envPath = path.join(appPath, '.env');
   shell.openPath(envPath);
+});
+
+ipcMain.handle('get-compose-path', () => composePath);
+
+ipcMain.handle('get-locale', () => currentLocale);
+
+ipcMain.on('set-locale', (_event, locale) => {
+  currentLocale = resolveLocale(locale);
+  if (mainWindow) {
+    mainWindow.setTitle(getString('app.title'));
+  }
+  if (tray) {
+    tray.setToolTip(getString('app.title'));
+    tray.setContextMenu(buildTrayMenu());
+  }
 });
 
 // App lifecycle
