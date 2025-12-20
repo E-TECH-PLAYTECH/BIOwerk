@@ -11,6 +11,18 @@
             box-sizing: border-box;
         }
 
+        .sr-only {
+            border: 0;
+            clip: rect(0, 0, 0, 0);
+            height: 1px;
+            margin: -1px;
+            overflow: hidden;
+            padding: 0;
+            position: absolute;
+            width: 1px;
+            white-space: nowrap;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #1e1e1e 0%, #2d2d2d 100%);
@@ -302,6 +314,29 @@
             animation: spin 1s ease-in-out infinite;
         }
 
+        .helper-text {
+            font-size: 12px;
+            color: #b3b3b3;
+            margin-top: 8px;
+        }
+
+        .nav-item,
+        .btn,
+        .service-btn,
+        .quick-link,
+        .service-card {
+            outline: none;
+        }
+
+        .nav-item:focus-visible,
+        .btn:focus-visible,
+        .service-btn:focus-visible,
+        .quick-link:focus-visible,
+        .service-card:focus-visible {
+            outline: 2px solid #80cbc4;
+            outline-offset: 2px;
+        }
+
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
@@ -340,11 +375,11 @@
     <div class="container">
         <div class="sidebar">
             <div class="logo">🧬 BIOwerk</div>
-            <div class="nav-item active" data-page="dashboard">Dashboard</div>
-            <div class="nav-item" data-page="services">Services</div>
-            <div class="nav-item" data-page="logs">Logs</div>
-            <div class="nav-item" data-page="links">Quick Links</div>
-            <div class="nav-item" data-page="settings">Settings</div>
+            <button class="nav-item active" type="button" data-page="dashboard" aria-label="Open dashboard" title="Open dashboard">Dashboard</button>
+            <button class="nav-item" type="button" data-page="services" aria-label="Open services view" title="Open services view">Services</button>
+            <button class="nav-item" type="button" data-page="logs" aria-label="Open logs view" title="Open logs view">Logs</button>
+            <button class="nav-item" type="button" data-page="links" aria-label="Open quick links" title="Open quick links">Quick Links</button>
+            <button class="nav-item" type="button" data-page="settings" aria-label="Open settings" title="Open settings">Settings</button>
         </div>
 
         <div class="main-content">
@@ -353,30 +388,35 @@
                 <div class="header">
                     <h1>BIOwerk Control Panel</h1>
                     <p>Manage your Bio-Themed Agentic Office Suite</p>
+                    <p class="helper-text" id="dashboard-help">
+                        Monitor launch health, remediation alerts, and keyboard-friendly controls for start, stop, refresh, and restart.
+                    </p>
                 </div>
 
-                <div id="docker-status-container" class="docker-status">
+                <div id="docker-status-container" class="docker-status" role="status" aria-live="polite">
                     <strong>Docker Status:</strong> <span id="docker-status">Checking...</span>
+                    <p class="helper-text">Verifies Docker install and daemon readiness across macOS, Windows, and Linux.</p>
                 </div>
 
-                <div id="alert-container"></div>
+                <div id="alert-container" aria-live="assertive"></div>
 
                 <div class="control-buttons">
-                    <button class="btn btn-primary" id="start-btn">
+                    <button class="btn btn-primary" id="start-btn" aria-label="Start BIOwerk services" title="Start BIOwerk services with Docker Compose">
                         ▶️ Start Services
                     </button>
-                    <button class="btn btn-danger" id="stop-btn">
+                    <button class="btn btn-danger" id="stop-btn" aria-label="Stop BIOwerk services" title="Stop BIOwerk services and clean up containers">
                         ⏹️ Stop Services
                     </button>
-                    <button class="btn btn-warning" id="restart-btn">
+                    <button class="btn btn-warning" id="restart-btn" aria-label="Restart BIOwerk services" title="Restart BIOwerk services">
                         🔄 Restart Services
                     </button>
-                    <button class="btn btn-secondary" id="refresh-btn">
+                    <button class="btn btn-secondary" id="refresh-btn" aria-label="Refresh service status" title="Refresh service health status">
                         🔃 Refresh Status
                     </button>
                 </div>
 
                 <h2>Service Status</h2>
+                <p class="helper-text">Tooltips surface remediation guidance for alerts, metrics, and actions; focus order follows the page layout.</p>
                 <div id="services-container" class="services-grid"></div>
             </div>
 
@@ -384,6 +424,7 @@
             <div id="services-page" class="page hidden">
                 <div class="header">
                     <h1>Services Management</h1>
+                    <p class="helper-text">Focus any card to review status, URLs, and remediation actions with clear labels.</p>
                 </div>
                 <div id="services-detail-container" class="services-grid"></div>
             </div>
@@ -392,41 +433,43 @@
             <div id="logs-page" class="page hidden">
                 <div class="header">
                     <h1>Service Logs</h1>
+                    <p class="helper-text">Use keyboard to focus the latest log output; screen readers announce new lines as they stream.</p>
                 </div>
                 <div class="control-buttons">
-                    <button class="btn btn-secondary" id="view-all-logs">All Services</button>
-                    <button class="btn btn-secondary" id="clear-logs">Clear Logs</button>
+                    <button class="btn btn-secondary" id="view-all-logs" aria-label="View logs for all services" title="View logs for all services">All Services</button>
+                    <button class="btn btn-secondary" id="clear-logs" aria-label="Clear logs display" title="Clear logs display">Clear Logs</button>
                 </div>
-                <div id="logs-display" class="logs-container"></div>
+                <div id="logs-display" class="logs-container" aria-live="polite" role="log"></div>
             </div>
 
             <!-- Quick Links Page -->
             <div id="links-page" class="page hidden">
                 <div class="header">
                     <h1>Quick Links</h1>
+                    <p class="helper-text">Tooltips describe each dashboard; links open in your default browser.</p>
                 </div>
                 <div class="quick-links">
-                    <a class="quick-link" data-url="http://localhost:8080/docs">
+                    <a class="quick-link" data-url="http://localhost:8080/docs" aria-label="Open API documentation" title="Open API documentation">
                         <div class="quick-link-icon">📚</div>
                         <div>API Documentation</div>
                     </a>
-                    <a class="quick-link" data-url="http://localhost:3000">
+                    <a class="quick-link" data-url="http://localhost:3000" aria-label="Open Grafana dashboard" title="Open Grafana dashboard">
                         <div class="quick-link-icon">📊</div>
                         <div>Grafana Dashboard</div>
                     </a>
-                    <a class="quick-link" data-url="http://localhost:9090">
+                    <a class="quick-link" data-url="http://localhost:9090" aria-label="Open Prometheus console" title="Open Prometheus console">
                         <div class="quick-link-icon">📈</div>
                         <div>Prometheus</div>
                     </a>
-                    <a class="quick-link" data-url="http://localhost:8080/v1/osteon/draft">
+                    <a class="quick-link" data-url="http://localhost:8080/v1/osteon/draft" aria-label="Open Osteon writer" title="Open Osteon writer">
                         <div class="quick-link-icon">📝</div>
                         <div>Osteon Writer</div>
                     </a>
-                    <a class="quick-link" data-url="http://localhost:8080/v1/myocyte/analyze">
+                    <a class="quick-link" data-url="http://localhost:8080/v1/myocyte/analyze" aria-label="Open Myocyte analysis" title="Open Myocyte analysis">
                         <div class="quick-link-icon">📊</div>
                         <div>Myocyte Analysis</div>
                     </a>
-                    <a class="quick-link" data-url="http://localhost:8080/v1/synapse/create">
+                    <a class="quick-link" data-url="http://localhost:8080/v1/synapse/create" aria-label="Open Synapse presentation" title="Open Synapse presentation">
                         <div class="quick-link-icon">🎨</div>
                         <div>Synapse Presentation</div>
                     </a>
@@ -441,7 +484,7 @@
                 <div class="settings-form">
                     <div class="form-group">
                         <label>Configuration File</label>
-                        <button class="btn btn-secondary" id="open-config-btn">Open .env File</button>
+                        <button class="btn btn-secondary" id="open-config-btn" aria-label="Open environment configuration file" title="Open environment configuration file">Open .env File</button>
                         <p style="margin-top: 10px; font-size: 12px; color: #999;">
                             Edit environment variables, API keys, and service configuration
                         </p>
@@ -563,19 +606,25 @@
         function createServiceCard(key, service) {
             const card = document.createElement('div');
             card.className = 'service-card';
+            card.setAttribute('role', 'group');
+            card.setAttribute('tabindex', '0');
+            card.setAttribute('aria-label', `${service.name} status ${service.status}`);
             card.innerHTML = `
                 <div class="service-header">
                     <div class="service-name">${service.name}</div>
-                    <div class="service-status ${service.status}"></div>
+                    <div class="service-status ${service.status}" title="Status: ${service.status}">
+                        <span class="sr-only">Status ${service.status}</span>
+                    </div>
                 </div>
                 <div class="service-info">
                     Status: <strong>${service.status}</strong><br>
                     URL: <code>${service.url}</code>
                 </div>
                 <div class="service-actions">
-                    <button class="service-btn" onclick="openUrl('${service.url}')">Open</button>
-                    <button class="service-btn" onclick="viewServiceLogs('${key}')">Logs</button>
+                    <button class="service-btn" onclick="openUrl('${service.url}')" aria-label="Open ${service.name} URL" title="Open ${service.name} URL">Open</button>
+                    <button class="service-btn" onclick="viewServiceLogs('${key}')" aria-label="View ${service.name} logs" title="View ${service.name} logs">Logs</button>
                 </div>
+                <p class="helper-text">Hover or focus for thresholds; alerts link to remediation guidance in dashboards.</p>
             `;
             return card;
         }
@@ -584,6 +633,7 @@
             const container = document.getElementById('alert-container');
             const alert = document.createElement('div');
             alert.className = `alert alert-${type}`;
+            alert.setAttribute('role', 'alert');
             alert.textContent = message;
             container.appendChild(alert);
 
