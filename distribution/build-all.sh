@@ -227,6 +227,13 @@ Works on all platforms without Docker:
 - **Grafana Dashboard**: http://localhost:3000 (admin/admin)
 - **Prometheus**: http://localhost:9090
 
+## Update Workflow (Delta & Full)
+
+1. Launch the Electron app and accept the auto-update prompt to view the embedded release notes and signature details.
+2. **Delta update**: Apply the streamed patch when prompted; confirm the verification checksum before restarting the app.
+3. **Full update**: Choose the full package path if the delta is unavailable; allow the installer to replace binaries and relink shortcuts.
+4. **Rollback**: If validation fails or services do not start, choose \"Rollback\" in the updater to revert to the prior build and re-run health checks.
+
 ## Configuration
 
 Edit the \`.env\` file in the installation directory:
