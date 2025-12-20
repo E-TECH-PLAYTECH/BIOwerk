@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Osteon",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,23 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_brief": {
+                  "summary": "Outline a reliability one-pager",
+                  "description": "Shows the minimal payload needed to seed an outline with topic and context.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "outline",
+                    "input": {
+                      "goal": "Outline a one-pager on platform reliability",
+                      "topic": "Reliability narrative for Q4 launch",
+                      "context": "Audience is the SRE steering group. Focus on uptime and rollback drills."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +115,29 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "section_draft": {
+                  "summary": "Draft a mitigation section",
+                  "description": "Generates prose for a specific section and outline.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "draft",
+                    "input": {
+                      "goal": "Produce a launch readiness brief",
+                      "section_title": "Risk mitigation and contingencies",
+                      "outline": [
+                        "Executive summary",
+                        "Architecture readiness",
+                        "Risk mitigation and contingencies",
+                        "Operational playbooks"
+                      ],
+                      "context": "Highlight rollback rehearsals and database failover coverage."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +177,22 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "tighten_copy": {
+                  "summary": "Improve launch messaging",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "edit",
+                    "input": {
+                      "text": "We think the platform should be okay for launch, teams tested most things.",
+                      "feedback": "Make the tone assertive and crisp. Emphasize verified readiness signals.",
+                      "edit_type": "improve"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -176,6 +232,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "executive_summary": {
+                  "summary": "Condense detailed notes",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "summarize",
+                    "input": {
+                      "text": "Engineering completed chaos drills across regions and restored service within SLO. Observability burn rates are green for the last 30 days.",
+                      "max_length": "short"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -215,6 +286,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "final_artifact": {
+                  "summary": "Export a finished narrative",
+                  "description": "Includes table-of-contents metadata to make the artifact discoverable.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "export",
+                    "input": {
+                      "title": "Launch Readiness Narrative",
+                      "sections": [
+                        {
+                          "id": "intro",
+                          "title": "Executive summary",
+                          "text": "BIOwerk is ready for Q4 launch."
+                        },
+                        {
+                          "id": "ops",
+                          "title": "Operational excellence",
+                          "text": "Runbooks rehearsed and on-call staffed."
+                        }
+                      ],
+                      "metadata": {
+                        "toc": [
+                          "Executive summary",
+                          "Operational excellence"
+                        ],
+                        "author": "release-manager@example.com"
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -254,6 +359,23 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_brief": {
+                  "summary": "Outline a reliability one-pager",
+                  "description": "Shows the minimal payload needed to seed an outline with topic and context.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "outline",
+                    "input": {
+                      "goal": "Outline a one-pager on platform reliability",
+                      "topic": "Reliability narrative for Q4 launch",
+                      "context": "Audience is the SRE steering group. Focus on uptime and rollback drills."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -280,7 +402,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/draft": {
@@ -293,6 +416,29 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "section_draft": {
+                  "summary": "Draft a mitigation section",
+                  "description": "Generates prose for a specific section and outline.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "draft",
+                    "input": {
+                      "goal": "Produce a launch readiness brief",
+                      "section_title": "Risk mitigation and contingencies",
+                      "outline": [
+                        "Executive summary",
+                        "Architecture readiness",
+                        "Risk mitigation and contingencies",
+                        "Operational playbooks"
+                      ],
+                      "context": "Highlight rollback rehearsals and database failover coverage."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -319,7 +465,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/edit": {
@@ -332,6 +479,22 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "tighten_copy": {
+                  "summary": "Improve launch messaging",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "edit",
+                    "input": {
+                      "text": "We think the platform should be okay for launch, teams tested most things.",
+                      "feedback": "Make the tone assertive and crisp. Emphasize verified readiness signals.",
+                      "edit_type": "improve"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -358,7 +521,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/summarize": {
@@ -371,6 +535,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "executive_summary": {
+                  "summary": "Condense detailed notes",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "summarize",
+                    "input": {
+                      "text": "Engineering completed chaos drills across regions and restored service within SLO. Observability burn rates are green for the last 30 days.",
+                      "max_length": "short"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -397,7 +576,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/export": {
@@ -410,6 +590,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "final_artifact": {
+                  "summary": "Export a finished narrative",
+                  "description": "Includes table-of-contents metadata to make the artifact discoverable.",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "osteon",
+                    "intent": "export",
+                    "input": {
+                      "title": "Launch Readiness Narrative",
+                      "sections": [
+                        {
+                          "id": "intro",
+                          "title": "Executive summary",
+                          "text": "BIOwerk is ready for Q4 launch."
+                        },
+                        {
+                          "id": "ops",
+                          "title": "Operational excellence",
+                          "text": "Runbooks rehearsed and on-call staffed."
+                        }
+                      ],
+                      "metadata": {
+                        "toc": [
+                          "Executive summary",
+                          "Operational excellence"
+                        ],
+                        "author": "release-manager@example.com"
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -436,7 +650,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },

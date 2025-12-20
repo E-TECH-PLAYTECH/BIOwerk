@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Mesh Gateway",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -139,6 +139,7 @@
         "summary": "Route Legacy",
         "description": "Legacy route handler for backward compatibility.\n\nDEPRECATED: This unversioned endpoint is deprecated. Please use /v1/{agent}/{endpoint}.\nThis endpoint defaults to API v1 but may be removed in future versions.",
         "operationId": "route_legacy__agent___endpoint__post",
+        "deprecated": true,
         "security": [
           {
             "HTTPBearer": []

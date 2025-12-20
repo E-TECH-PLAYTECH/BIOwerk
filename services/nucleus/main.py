@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
 from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 from matrix.api_models import (
     PlanRequest,
     RouteRequest,
@@ -17,7 +18,7 @@ import time
 import json
 import httpx
 
-app = FastAPI(title="Nucleus")
+app = FastAPI(title="Nucleus", version="1.0.0")
 setup_instrumentation(app, service_name="nucleus", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("nucleus")
@@ -25,6 +26,60 @@ logger = setup_logging("nucleus")
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="nucleus", version="1.0.0")
+
+NUCLEUS_EXAMPLES = {
+    "plan": {
+        "execution_plan": build_msg_example(
+            target="nucleus",
+            intent="plan",
+            summary="Create an agent execution plan",
+            input_payload={
+                "goal": "Ship the launch readiness narrative by Friday",
+                "requirements": ["Osteon outline", "Synapse deck draft", "Chaperone export"],
+                "available_agents": ["osteon", "synapse", "chaperone", "circadian"],
+            },
+        )
+    },
+    "route": {
+        "intent_router": build_msg_example(
+            target="nucleus",
+            intent="route",
+            summary="Route a user request to the right agent",
+            input_payload={
+                "request": "Give me a storyboard and slides for the launch update",
+                "context": "We already have a draft outline from Osteon.",
+            },
+        )
+    },
+    "review": {
+        "content_review": build_msg_example(
+            target="nucleus",
+            intent="review",
+            summary="Review an artifact with explicit criteria",
+            input_payload={
+                "content": {"sections": [{"title": "Risks", "text": "Traffic surge is a top risk."}]},
+                "criteria": ["quality", "risk_coverage", "actionability"],
+            },
+        )
+    },
+    "finalize": {
+        "final_handoff": build_msg_example(
+            target="nucleus",
+            intent="finalize",
+            summary="Finalize a workflow handoff",
+            input_payload={
+                "workflow_results": [
+                    {"agent": "osteon", "status": "ok", "artifact": {"outline": ["Intro", "Risks", "Actions"]}},
+                    {"agent": "synapse", "status": "ok", "slides": 8},
+                ],
+                "goal": "Compile the Q4 readiness pack",
+            },
+        )
+    },
+}
+NUCLEUS_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in NUCLEUS_EXAMPLES.items()
+}
 
 AGENTS = {
     "osteon": "http://mesh:8080/osteon",
@@ -299,31 +354,31 @@ Create a comprehensive summary and final status."""
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/plan", response_model=Reply)
-async def plan_v1(msg: Msg):
+@app.post("/v1/plan", response_model=Reply, openapi_extra=NUCLEUS_REQUEST_BODIES["plan"])
+async def plan_v1(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["plan"])):
     """Plan endpoint (API v1)."""
     return await _plan_handler(msg)
 
-@app.post("/v1/route", response_model=Reply)
-async def route_v1(msg: Msg):
+@app.post("/v1/route", response_model=Reply, openapi_extra=NUCLEUS_REQUEST_BODIES["route"])
+async def route_v1(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["route"])):
     """Route endpoint (API v1)."""
     return await _route_handler(msg)
 
-@app.post("/v1/review", response_model=Reply)
-async def review_v1(msg: Msg):
+@app.post("/v1/review", response_model=Reply, openapi_extra=NUCLEUS_REQUEST_BODIES["review"])
+async def review_v1(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["review"])):
     """Review endpoint (API v1)."""
     return await _review_handler(msg)
 
-@app.post("/v1/finalize", response_model=Reply)
-async def finalize_v1(msg: Msg):
+@app.post("/v1/finalize", response_model=Reply, openapi_extra=NUCLEUS_REQUEST_BODIES["finalize"])
+async def finalize_v1(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["finalize"])):
     """Finalize endpoint (API v1)."""
     return await _finalize_handler(msg)
 # ============================================================================
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/plan", response_model=Reply)
-async def plan_legacy(msg: Msg):
+@app.post("/plan", response_model=Reply, deprecated=True, openapi_extra=NUCLEUS_REQUEST_BODIES["plan"])
+async def plan_legacy(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["plan"])):
     """
     DEPRECATED: Use /v1/plan instead.
     Plan endpoint.
@@ -331,8 +386,8 @@ async def plan_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /plan used. Please migrate to /v1/plan")
     return await _plan_handler(msg)
 
-@app.post("/route", response_model=Reply)
-async def route_legacy(msg: Msg):
+@app.post("/route", response_model=Reply, deprecated=True, openapi_extra=NUCLEUS_REQUEST_BODIES["route"])
+async def route_legacy(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["route"])):
     """
     DEPRECATED: Use /v1/route instead.
     Route endpoint.
@@ -340,8 +395,8 @@ async def route_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /route used. Please migrate to /v1/route")
     return await _route_handler(msg)
 
-@app.post("/review", response_model=Reply)
-async def review_legacy(msg: Msg):
+@app.post("/review", response_model=Reply, deprecated=True, openapi_extra=NUCLEUS_REQUEST_BODIES["review"])
+async def review_legacy(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["review"])):
     """
     DEPRECATED: Use /v1/review instead.
     Review endpoint.
@@ -349,8 +404,8 @@ async def review_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /review used. Please migrate to /v1/review")
     return await _review_handler(msg)
 
-@app.post("/finalize", response_model=Reply)
-async def finalize_legacy(msg: Msg):
+@app.post("/finalize", response_model=Reply, deprecated=True, openapi_extra=NUCLEUS_REQUEST_BODIES["finalize"])
+async def finalize_legacy(msg: Msg = Body(..., examples=NUCLEUS_EXAMPLES["finalize"])):
     """
     DEPRECATED: Use /v1/finalize instead.
     Finalize endpoint.

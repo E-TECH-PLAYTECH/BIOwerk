@@ -217,7 +217,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Mesh instance {MESH_INSTANCE_ID} shutdown complete")
 
 
-app = FastAPI(title="Mesh Gateway", lifespan=lifespan)
+app = FastAPI(title="Mesh Gateway", version="1.0.0", lifespan=lifespan)
 setup_instrumentation(app, service_name="mesh", service_version="1.0.0")
 logger = setup_logging("mesh")
 
@@ -651,7 +651,7 @@ async def route_v1(
 # Legacy Routes (Backward Compatibility)
 # ============================================================================
 
-@app.post("/{agent}/{endpoint}")
+@app.post("/{agent}/{endpoint}", deprecated=True)
 async def route_legacy(
     agent: str,
     endpoint: str,

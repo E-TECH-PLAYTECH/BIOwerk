@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Synapse",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,23 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_review": {
+                  "summary": "Outline a launch review deck",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "storyboard",
+                    "input": {
+                      "topic": "Q4 launch review",
+                      "goal": "Show readiness, risks, and next steps",
+                      "audience": "executive steering committee",
+                      "num_slides": 8
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +115,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "expand_storyboard": {
+                  "summary": "Draft slides from a storyboard",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "slide_make",
+                    "input": {
+                      "storyboard": [
+                        {
+                          "title": "Readiness snapshot",
+                          "bullets": [
+                            "SLO burn < 0.6",
+                            "All runbooks rehearsed"
+                          ]
+                        },
+                        {
+                          "title": "Risks + mitigations",
+                          "bullets": [
+                            "Traffic spike",
+                            "Database lag"
+                          ]
+                        }
+                      ],
+                      "topic": "BIOwerk platform launch"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +184,33 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "chart_request": {
+                  "summary": "Create a simple chart",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "visualize",
+                    "input": {
+                      "description": "Weekly signups vs activations",
+                      "data": [
+                        {
+                          "week": "W41",
+                          "signups": 420,
+                          "activations": 310
+                        },
+                        {
+                          "week": "W42",
+                          "signups": 450,
+                          "activations": 330
+                        }
+                      ],
+                      "viz_type": "bar"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -176,6 +250,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "deck_export": {
+                  "summary": "Export a finished slide deck",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "export",
+                    "input": {
+                      "title": "Launch Readiness Deck",
+                      "sections": [
+                        {
+                          "id": "s1",
+                          "title": "Overview",
+                          "text": "Launch readiness status by track."
+                        },
+                        {
+                          "id": "s2",
+                          "title": "Risks",
+                          "text": "Traffic spikes and rollback rehearsal outcomes."
+                        }
+                      ],
+                      "metadata": {
+                        "theme": "executive",
+                        "cover_image": "s3://artifacts/launch-cover.png"
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -215,6 +319,23 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_review": {
+                  "summary": "Outline a launch review deck",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "storyboard",
+                    "input": {
+                      "topic": "Q4 launch review",
+                      "goal": "Show readiness, risks, and next steps",
+                      "audience": "executive steering committee",
+                      "num_slides": 8
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -241,7 +362,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/slide_make": {
@@ -254,6 +376,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "expand_storyboard": {
+                  "summary": "Draft slides from a storyboard",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "slide_make",
+                    "input": {
+                      "storyboard": [
+                        {
+                          "title": "Readiness snapshot",
+                          "bullets": [
+                            "SLO burn < 0.6",
+                            "All runbooks rehearsed"
+                          ]
+                        },
+                        {
+                          "title": "Risks + mitigations",
+                          "bullets": [
+                            "Traffic spike",
+                            "Database lag"
+                          ]
+                        }
+                      ],
+                      "topic": "BIOwerk platform launch"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -280,7 +432,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/visualize": {
@@ -293,6 +446,33 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "chart_request": {
+                  "summary": "Create a simple chart",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "visualize",
+                    "input": {
+                      "description": "Weekly signups vs activations",
+                      "data": [
+                        {
+                          "week": "W41",
+                          "signups": 420,
+                          "activations": 310
+                        },
+                        {
+                          "week": "W42",
+                          "signups": 450,
+                          "activations": 330
+                        }
+                      ],
+                      "viz_type": "bar"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -319,7 +499,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/export": {
@@ -332,6 +513,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "deck_export": {
+                  "summary": "Export a finished slide deck",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "synapse",
+                    "intent": "export",
+                    "input": {
+                      "title": "Launch Readiness Deck",
+                      "sections": [
+                        {
+                          "id": "s1",
+                          "title": "Overview",
+                          "text": "Launch readiness status by track."
+                        },
+                        {
+                          "id": "s2",
+                          "title": "Risks",
+                          "text": "Traffic spikes and rollback rehearsal outcomes."
+                        }
+                      ],
+                      "metadata": {
+                        "theme": "executive",
+                        "cover_image": "s3://artifacts/launch-cover.png"
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -358,7 +569,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },

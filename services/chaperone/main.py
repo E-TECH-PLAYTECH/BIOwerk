@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
@@ -7,11 +7,12 @@ from matrix.errors import InvalidInputError, ValidationError, create_error_respo
 from matrix.llm_client import llm_client
 from matrix.validation import setup_validation_middleware
 from pydantic import ValidationError as PydanticValidationError
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 import time
 import json
 import base64
 
-app = FastAPI(title="Chaperone")
+app = FastAPI(title="Chaperone", version="1.0.0")
 setup_instrumentation(app, service_name="chaperone", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("chaperone")
@@ -19,6 +20,44 @@ logger = setup_logging("chaperone")
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="chaperone", version="1.0.0")
+
+CHAPERONE_EXAMPLES = {
+    "import_artifact": {
+        "markdown_ingest": build_msg_example(
+            target="chaperone",
+            intent="import_artifact",
+            summary="Ingest markdown notes",
+            input_payload={
+                "format": "markdown",
+                "artifact_type": "osteon",
+                "content": "# Launch runbook\n- Validate metrics burn rates\n- Confirm rollback rehearsals completed",
+            },
+        )
+    },
+    "export_artifact": {
+        "pdf_export": build_msg_example(
+            target="chaperone",
+            intent="export_artifact",
+            summary="Export an osteon artifact to PDF",
+            input_payload={
+                "format": "pdf",
+                "artifact": {
+                    "kind": "osteon",
+                    "meta": {"title": "Launch Readiness Narrative"},
+                    "body": {
+                        "sections": [
+                            {"id": "intro", "title": "Executive summary", "text": "BIOwerk is ready for launch."},
+                            {"id": "risks", "title": "Risks", "text": "Traffic spikes, database lag"},
+                        ]
+                    },
+                },
+            },
+        )
+    },
+}
+CHAPERONE_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in CHAPERONE_EXAMPLES.items()
+}
 
 # ============================================================================
 # Internal Handler Functions
@@ -190,21 +229,21 @@ Format the content appropriately for {target_format} and provide export guidance
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/import_artifact", response_model=Reply)
-async def import_artifact_v1(msg: Msg):
+@app.post("/v1/import_artifact", response_model=Reply, openapi_extra=CHAPERONE_REQUEST_BODIES["import_artifact"])
+async def import_artifact_v1(msg: Msg = Body(..., examples=CHAPERONE_EXAMPLES["import_artifact"])):
     """Import Artifact endpoint (API v1)."""
     return await _import_artifact_handler(msg)
 
-@app.post("/v1/export_artifact", response_model=Reply)
-async def export_artifact_v1(msg: Msg):
+@app.post("/v1/export_artifact", response_model=Reply, openapi_extra=CHAPERONE_REQUEST_BODIES["export_artifact"])
+async def export_artifact_v1(msg: Msg = Body(..., examples=CHAPERONE_EXAMPLES["export_artifact"])):
     """Export Artifact endpoint (API v1)."""
     return await _export_artifact_handler(msg)
 # ============================================================================
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/import_artifact", response_model=Reply)
-async def import_artifact_legacy(msg: Msg):
+@app.post("/import_artifact", response_model=Reply, deprecated=True, openapi_extra=CHAPERONE_REQUEST_BODIES["import_artifact"])
+async def import_artifact_legacy(msg: Msg = Body(..., examples=CHAPERONE_EXAMPLES["import_artifact"])):
     """
     DEPRECATED: Use /v1/import_artifact instead.
     Import Artifact endpoint.
@@ -212,8 +251,8 @@ async def import_artifact_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /import_artifact used. Please migrate to /v1/import_artifact")
     return await _import_artifact_handler(msg)
 
-@app.post("/export_artifact", response_model=Reply)
-async def export_artifact_legacy(msg: Msg):
+@app.post("/export_artifact", response_model=Reply, deprecated=True, openapi_extra=CHAPERONE_REQUEST_BODIES["export_artifact"])
+async def export_artifact_legacy(msg: Msg = Body(..., examples=CHAPERONE_EXAMPLES["export_artifact"])):
     """
     DEPRECATED: Use /v1/export_artifact instead.
     Export Artifact endpoint.
