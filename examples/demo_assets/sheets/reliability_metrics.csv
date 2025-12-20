@@ -1,0 +1,8 @@
+metric,description,current,previous,target,notes
+service_availability,Composite uptime across mesh,99.96,99.92,99.95,Includes mesh front door and agent pods
+latency_p50_ms,Median end-to-end response time,420,480,400,Measured under synthetic load; goal to reduce with cache tuning
+latency_p95_ms,95th percentile response time,910,1020,850,Drive down tail latency via queue backpressure
+error_rate_pct,HTTP 5xx percentage,0.22,0.34,0.20,Post-circuit-breaker adjustments in osteon and myocyte
+change_failure_rate_pct,Incidents per deploy window,2.1,2.9,2.0,Improve through staged rollouts and automated rollbacks
+mttr_minutes,Mean time to recovery,14,19,12,Lower with faster playbooks and richer runbooks
+throughput_rps,Requests per second sustained,185,160,190,Includes nucleus orchestration fan-out

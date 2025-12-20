@@ -36,6 +36,12 @@ Need ongoing service insight? See [Operations](#operations) for observability an
 
 Looking for one command to get set up? Use the unified control script documented in [Installation and Operations](docs/INSTALLATION_AND_OPERATIONS.md).
 
+## Demo assets and walkthroughs
+
+- Sanitized document, sheet, and slide datasets live in `examples/demo_assets`; stage them with `python examples/manage_demo_assets.py load`.
+- Run the end-to-end showcase (draft, analyze, visualize) with `python examples/mesh_agent_showcase.py --dry-run` or open `examples/notebooks/mesh_agent_walkthrough.ipynb`.
+- Full instructions and expected outputs are documented in [Demo Assets](docs/DEMO_ASSETS.md).
+
 ## Installation Options
 
 BIOwerk offers multiple installation methods to suit different use cases:
