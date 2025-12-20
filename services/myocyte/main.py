@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
 from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 from matrix.api_models import (
     IngestTableRequest,
     FormulaEvalRequest,
@@ -16,7 +17,7 @@ from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
-app = FastAPI(title="Myocyte")
+app = FastAPI(title="Myocyte", version="1.0.0")
 setup_instrumentation(app, service_name="myocyte", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("myocyte")
@@ -24,6 +25,86 @@ logger = setup_logging("myocyte")
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="myocyte", version="1.0.0")
+
+MYOCYTE_EXAMPLES = {
+    "ingest_table": {
+        "csv_ingest": build_msg_example(
+            target="myocyte",
+            intent="ingest_table",
+            summary="Parse a pasted CSV extract",
+            input_payload={
+                "raw_data": "region,revenue,expenses\nNA,120000,45000\nEU,98000,41000",
+                "tables": [],
+            },
+        )
+    },
+    "formula_eval": {
+        "apply_formulas": build_msg_example(
+            target="myocyte",
+            intent="formula_eval",
+            summary="Calculate gross margin and growth",
+            input_payload={
+                "tables": [
+                    {
+                        "id": "rev-1",
+                        "name": "Monthly Revenue",
+                        "headers": ["month", "revenue", "expenses"],
+                        "rows": [
+                            ["Jan", 120000, 45000],
+                            ["Feb", 135000, 47000],
+                            ["Mar", 150000, 50000],
+                        ],
+                    }
+                ],
+                "formulas": [
+                    {"name": "gross_margin", "expression": "revenue - expenses"},
+                    {"name": "growth_rate", "expression": "(revenue / lag(revenue)) - 1"},
+                ],
+            },
+        )
+    },
+    "model_forecast": {
+        "forecast_pipeline": build_msg_example(
+            target="myocyte",
+            intent="model_forecast",
+            summary="Generate a revenue forecast",
+            input_payload={
+                "tables": [
+                    {
+                        "id": "rev-1",
+                        "name": "ARR by month",
+                        "headers": ["month", "arr"],
+                        "rows": [
+                            ["Jan", 220000],
+                            ["Feb", 230000],
+                            ["Mar", 245000],
+                        ],
+                    }
+                ],
+                "forecast_type": "trend",
+                "periods": 4,
+            },
+        )
+    },
+    "export": {
+        "bundle_artifact": build_msg_example(
+            target="myocyte",
+            intent="export",
+            summary="Export calculated tables with metadata",
+            input_payload={
+                "title": "Revenue Analysis Pack",
+                "metadata": {
+                    "tables": [{"id": "rev-1", "name": "ARR by month"}],
+                    "formulas": ["gross_margin", "growth_rate"],
+                    "charts": ["arr_trend", "margin_by_region"],
+                },
+            },
+        )
+    },
+}
+MYOCYTE_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in MYOCYTE_EXAMPLES.items()
+}
 
 # ============================================================================
 # Internal Handler Functions
@@ -305,31 +386,31 @@ async def _export__handler(msg: Msg) -> Reply:
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/ingest_table", response_model=Reply)
-async def ingest_table_v1(msg: Msg):
+@app.post("/v1/ingest_table", response_model=Reply, openapi_extra=MYOCYTE_REQUEST_BODIES["ingest_table"])
+async def ingest_table_v1(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["ingest_table"])):
     """Ingest Table endpoint (API v1)."""
     return await _ingest_table_handler(msg)
 
-@app.post("/v1/formula_eval", response_model=Reply)
-async def formula_eval_v1(msg: Msg):
+@app.post("/v1/formula_eval", response_model=Reply, openapi_extra=MYOCYTE_REQUEST_BODIES["formula_eval"])
+async def formula_eval_v1(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["formula_eval"])):
     """Formula Eval endpoint (API v1)."""
     return await _formula_eval_handler(msg)
 
-@app.post("/v1/model_forecast", response_model=Reply)
-async def model_forecast_v1(msg: Msg):
+@app.post("/v1/model_forecast", response_model=Reply, openapi_extra=MYOCYTE_REQUEST_BODIES["model_forecast"])
+async def model_forecast_v1(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["model_forecast"])):
     """Model Forecast endpoint (API v1)."""
     return await _model_forecast_handler(msg)
 
-@app.post("/v1/export", response_model=Reply)
-async def export__v1(msg: Msg):
+@app.post("/v1/export", response_model=Reply, openapi_extra=MYOCYTE_REQUEST_BODIES["export"])
+async def export__v1(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["export"])):
     """Export  endpoint (API v1)."""
     return await _export__handler(msg)
 # ============================================================================
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/ingest_table", response_model=Reply)
-async def ingest_table_legacy(msg: Msg):
+@app.post("/ingest_table", response_model=Reply, deprecated=True, openapi_extra=MYOCYTE_REQUEST_BODIES["ingest_table"])
+async def ingest_table_legacy(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["ingest_table"])):
     """
     DEPRECATED: Use /v1/ingest_table instead.
     Ingest Table endpoint.
@@ -337,8 +418,8 @@ async def ingest_table_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /ingest_table used. Please migrate to /v1/ingest_table")
     return await _ingest_table_handler(msg)
 
-@app.post("/formula_eval", response_model=Reply)
-async def formula_eval_legacy(msg: Msg):
+@app.post("/formula_eval", response_model=Reply, deprecated=True, openapi_extra=MYOCYTE_REQUEST_BODIES["formula_eval"])
+async def formula_eval_legacy(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["formula_eval"])):
     """
     DEPRECATED: Use /v1/formula_eval instead.
     Formula Eval endpoint.
@@ -346,8 +427,8 @@ async def formula_eval_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /formula_eval used. Please migrate to /v1/formula_eval")
     return await _formula_eval_handler(msg)
 
-@app.post("/model_forecast", response_model=Reply)
-async def model_forecast_legacy(msg: Msg):
+@app.post("/model_forecast", response_model=Reply, deprecated=True, openapi_extra=MYOCYTE_REQUEST_BODIES["model_forecast"])
+async def model_forecast_legacy(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["model_forecast"])):
     """
     DEPRECATED: Use /v1/model_forecast instead.
     Model Forecast endpoint.
@@ -355,8 +436,8 @@ async def model_forecast_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /model_forecast used. Please migrate to /v1/model_forecast")
     return await _model_forecast_handler(msg)
 
-@app.post("/export", response_model=Reply)
-async def export__legacy(msg: Msg):
+@app.post("/export", response_model=Reply, deprecated=True, openapi_extra=MYOCYTE_REQUEST_BODIES["export"])
+async def export__legacy(msg: Msg = Body(..., examples=MYOCYTE_EXAMPLES["export"])):
     """
     DEPRECATED: Use /v1/export instead.
     Export  endpoint.

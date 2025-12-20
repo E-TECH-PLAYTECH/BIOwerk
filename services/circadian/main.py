@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
@@ -7,10 +7,11 @@ from matrix.errors import InvalidInputError, ValidationError, create_error_respo
 from matrix.llm_client import llm_client
 from matrix.validation import setup_validation_middleware
 from pydantic import ValidationError as PydanticValidationError
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 import time
 import json
 
-app = FastAPI(title="Circadian")
+app = FastAPI(title="Circadian", version="1.0.0")
 setup_instrumentation(app, service_name="circadian", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("circadian")
@@ -18,6 +19,77 @@ logger = setup_logging("circadian")
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="circadian", version="1.0.0")
+
+CIRCADIAN_EXAMPLES = {
+    "plan_timeline": {
+        "launch_timeline": build_msg_example(
+            target="circadian",
+            intent="plan_timeline",
+            summary="Create a 10-week rollout plan",
+            input_payload={
+                "project_description": "BIOwerk launch hardening",
+                "goals": [
+                    "Complete load test at 5x baseline",
+                    "Run failover rehearsal with database replicas",
+                    "Publish customer-facing status runbook",
+                ],
+                "duration_weeks": 10,
+                "team_size": 6,
+            },
+        )
+    },
+    "assign": {
+        "task_assignment": build_msg_example(
+            target="circadian",
+            intent="assign",
+            summary="Assign work by skills and workload",
+            input_payload={
+                "tasks": [
+                    {"id": "t1", "name": "Chaos drill", "priority": "high", "required_skills": ["sre", "observability"]},
+                    {"id": "t2", "name": "Runbook review", "priority": "medium", "required_skills": ["ops", "docs"]},
+                ],
+                "team_members": [
+                    {"name": "Alex", "skills": ["sre", "platform"], "capacity": 0.5},
+                    {"name": "Priya", "skills": ["ops", "docs"], "capacity": 0.8},
+                ],
+            },
+        )
+    },
+    "track": {
+        "project_status": build_msg_example(
+            target="circadian",
+            intent="track",
+            summary="Assess progress by week",
+            input_payload={
+                "current_week": 4,
+                "completed_tasks": [{"id": "t1", "name": "Chaos drill", "status": "done"}],
+                "in_progress_tasks": [{"id": "t2", "name": "Runbook review", "status": "in_progress"}],
+                "timeline": [
+                    {"id": "m1", "milestone": "Resilience tests", "week": 3},
+                    {"id": "m2", "milestone": "GA checklist", "week": 6},
+                ],
+            },
+        )
+    },
+    "remind": {
+        "weekly_reminders": build_msg_example(
+            target="circadian",
+            intent="remind",
+            summary="Generate reminders from assignments",
+            input_payload={
+                "current_week": 5,
+                "timeline": [{"id": "m2", "milestone": "GA checklist", "week": 6}],
+                "assignments": [
+                    {"task_id": "t2", "task_name": "Runbook review", "assignee": "Priya", "due_week": 5},
+                    {"task_id": "t3", "task_name": "Load test at 5x", "assignee": "Alex", "due_week": 6},
+                ],
+            },
+        )
+    },
+}
+CIRCADIAN_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in CIRCADIAN_EXAMPLES.items()
+}
 
 # ============================================================================
 # Internal Handler Functions
@@ -277,31 +349,31 @@ Create 3-5 specific, actionable reminders for upcoming tasks and deadlines."""
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/plan_timeline", response_model=Reply)
-async def plan_timeline_v1(msg: Msg):
+@app.post("/v1/plan_timeline", response_model=Reply, openapi_extra=CIRCADIAN_REQUEST_BODIES["plan_timeline"])
+async def plan_timeline_v1(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["plan_timeline"])):
     """Plan Timeline endpoint (API v1)."""
     return await _plan_timeline_handler(msg)
 
-@app.post("/v1/assign", response_model=Reply)
-async def assign_v1(msg: Msg):
+@app.post("/v1/assign", response_model=Reply, openapi_extra=CIRCADIAN_REQUEST_BODIES["assign"])
+async def assign_v1(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["assign"])):
     """Assign endpoint (API v1)."""
     return await _assign_handler(msg)
 
-@app.post("/v1/track", response_model=Reply)
-async def track_v1(msg: Msg):
+@app.post("/v1/track", response_model=Reply, openapi_extra=CIRCADIAN_REQUEST_BODIES["track"])
+async def track_v1(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["track"])):
     """Track endpoint (API v1)."""
     return await _track_handler(msg)
 
-@app.post("/v1/remind", response_model=Reply)
-async def remind_v1(msg: Msg):
+@app.post("/v1/remind", response_model=Reply, openapi_extra=CIRCADIAN_REQUEST_BODIES["remind"])
+async def remind_v1(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["remind"])):
     """Remind endpoint (API v1)."""
     return await _remind_handler(msg)
 # ============================================================================
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/plan_timeline", response_model=Reply)
-async def plan_timeline_legacy(msg: Msg):
+@app.post("/plan_timeline", response_model=Reply, deprecated=True, openapi_extra=CIRCADIAN_REQUEST_BODIES["plan_timeline"])
+async def plan_timeline_legacy(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["plan_timeline"])):
     """
     DEPRECATED: Use /v1/plan_timeline instead.
     Plan Timeline endpoint.
@@ -309,8 +381,8 @@ async def plan_timeline_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /plan_timeline used. Please migrate to /v1/plan_timeline")
     return await _plan_timeline_handler(msg)
 
-@app.post("/assign", response_model=Reply)
-async def assign_legacy(msg: Msg):
+@app.post("/assign", response_model=Reply, deprecated=True, openapi_extra=CIRCADIAN_REQUEST_BODIES["assign"])
+async def assign_legacy(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["assign"])):
     """
     DEPRECATED: Use /v1/assign instead.
     Assign endpoint.
@@ -318,8 +390,8 @@ async def assign_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /assign used. Please migrate to /v1/assign")
     return await _assign_handler(msg)
 
-@app.post("/track", response_model=Reply)
-async def track_legacy(msg: Msg):
+@app.post("/track", response_model=Reply, deprecated=True, openapi_extra=CIRCADIAN_REQUEST_BODIES["track"])
+async def track_legacy(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["track"])):
     """
     DEPRECATED: Use /v1/track instead.
     Track endpoint.
@@ -327,8 +399,8 @@ async def track_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /track used. Please migrate to /v1/track")
     return await _track_handler(msg)
 
-@app.post("/remind", response_model=Reply)
-async def remind_legacy(msg: Msg):
+@app.post("/remind", response_model=Reply, deprecated=True, openapi_extra=CIRCADIAN_REQUEST_BODIES["remind"])
+async def remind_legacy(msg: Msg = Body(..., examples=CIRCADIAN_EXAMPLES["remind"])):
     """
     DEPRECATED: Use /v1/remind instead.
     Remind endpoint.

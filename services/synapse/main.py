@@ -1,10 +1,11 @@
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
 from matrix.logging_config import setup_logging, log_request, log_response, log_error
 from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 from matrix.api_models import (
     StoryboardRequest,
     SlideMakeRequest,
@@ -16,7 +17,7 @@ from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
-app = FastAPI(title="Synapse")
+app = FastAPI(title="Synapse", version="1.0.0")
 setup_instrumentation(app, service_name="synapse", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("synapse")
@@ -24,6 +25,69 @@ logger = setup_logging("synapse")
 # Setup comprehensive health and readiness endpoints
 from matrix.health import setup_health_endpoints
 setup_health_endpoints(app, service_name="synapse", version="1.0.0")
+
+SYNAPSE_EXAMPLES = {
+    "storyboard": {
+        "launch_review": build_msg_example(
+            target="synapse",
+            intent="storyboard",
+            summary="Outline a launch review deck",
+            input_payload={
+                "topic": "Q4 launch review",
+                "goal": "Show readiness, risks, and next steps",
+                "audience": "executive steering committee",
+                "num_slides": 8,
+            },
+        )
+    },
+    "slide_make": {
+        "expand_storyboard": build_msg_example(
+            target="synapse",
+            intent="slide_make",
+            summary="Draft slides from a storyboard",
+            input_payload={
+                "storyboard": [
+                    {"title": "Readiness snapshot", "bullets": ["SLO burn < 0.6", "All runbooks rehearsed"]},
+                    {"title": "Risks + mitigations", "bullets": ["Traffic spike", "Database lag"]},
+                ],
+                "topic": "BIOwerk platform launch",
+            },
+        )
+    },
+    "visualize": {
+        "chart_request": build_msg_example(
+            target="synapse",
+            intent="visualize",
+            summary="Create a simple chart",
+            input_payload={
+                "description": "Weekly signups vs activations",
+                "data": [
+                    {"week": "W41", "signups": 420, "activations": 310},
+                    {"week": "W42", "signups": 450, "activations": 330},
+                ],
+                "viz_type": "bar",
+            },
+        )
+    },
+    "export": {
+        "deck_export": build_msg_example(
+            target="synapse",
+            intent="export",
+            summary="Export a finished slide deck",
+            input_payload={
+                "title": "Launch Readiness Deck",
+                "sections": [
+                    {"id": "s1", "title": "Overview", "text": "Launch readiness status by track."},
+                    {"id": "s2", "title": "Risks", "text": "Traffic spikes and rollback rehearsal outcomes."},
+                ],
+                "metadata": {"theme": "executive", "cover_image": "s3://artifacts/launch-cover.png"},
+            },
+        )
+    },
+}
+SYNAPSE_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in SYNAPSE_EXAMPLES.items()
+}
 
 # ============================================================================
 # Internal Handler Functions
@@ -279,31 +343,31 @@ async def _export__handler(msg: Msg) -> Reply:
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/storyboard", response_model=Reply)
-async def storyboard_v1(msg: Msg):
+@app.post("/v1/storyboard", response_model=Reply, openapi_extra=SYNAPSE_REQUEST_BODIES["storyboard"])
+async def storyboard_v1(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["storyboard"])):
     """Storyboard endpoint (API v1)."""
     return await _storyboard_handler(msg)
 
-@app.post("/v1/slide_make", response_model=Reply)
-async def slide_make_v1(msg: Msg):
+@app.post("/v1/slide_make", response_model=Reply, openapi_extra=SYNAPSE_REQUEST_BODIES["slide_make"])
+async def slide_make_v1(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["slide_make"])):
     """Slide Make endpoint (API v1)."""
     return await _slide_make_handler(msg)
 
-@app.post("/v1/visualize", response_model=Reply)
-async def visualize_v1(msg: Msg):
+@app.post("/v1/visualize", response_model=Reply, openapi_extra=SYNAPSE_REQUEST_BODIES["visualize"])
+async def visualize_v1(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["visualize"])):
     """Visualize endpoint (API v1)."""
     return await _visualize_handler(msg)
 
-@app.post("/v1/export", response_model=Reply)
-async def export__v1(msg: Msg):
+@app.post("/v1/export", response_model=Reply, openapi_extra=SYNAPSE_REQUEST_BODIES["export"])
+async def export__v1(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["export"])):
     """Export  endpoint (API v1)."""
     return await _export__handler(msg)
 # ============================================================================
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/storyboard", response_model=Reply)
-async def storyboard_legacy(msg: Msg):
+@app.post("/storyboard", response_model=Reply, deprecated=True, openapi_extra=SYNAPSE_REQUEST_BODIES["storyboard"])
+async def storyboard_legacy(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["storyboard"])):
     """
     DEPRECATED: Use /v1/storyboard instead.
     Storyboard endpoint.
@@ -311,8 +375,8 @@ async def storyboard_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /storyboard used. Please migrate to /v1/storyboard")
     return await _storyboard_handler(msg)
 
-@app.post("/slide_make", response_model=Reply)
-async def slide_make_legacy(msg: Msg):
+@app.post("/slide_make", response_model=Reply, deprecated=True, openapi_extra=SYNAPSE_REQUEST_BODIES["slide_make"])
+async def slide_make_legacy(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["slide_make"])):
     """
     DEPRECATED: Use /v1/slide_make instead.
     Slide Make endpoint.
@@ -320,8 +384,8 @@ async def slide_make_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /slide_make used. Please migrate to /v1/slide_make")
     return await _slide_make_handler(msg)
 
-@app.post("/visualize", response_model=Reply)
-async def visualize_legacy(msg: Msg):
+@app.post("/visualize", response_model=Reply, deprecated=True, openapi_extra=SYNAPSE_REQUEST_BODIES["visualize"])
+async def visualize_legacy(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["visualize"])):
     """
     DEPRECATED: Use /v1/visualize instead.
     Visualize endpoint.
@@ -329,8 +393,8 @@ async def visualize_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /visualize used. Please migrate to /v1/visualize")
     return await _visualize_handler(msg)
 
-@app.post("/export", response_model=Reply)
-async def export__legacy(msg: Msg):
+@app.post("/export", response_model=Reply, deprecated=True, openapi_extra=SYNAPSE_REQUEST_BODIES["export"])
+async def export__legacy(msg: Msg = Body(..., examples=SYNAPSE_EXAMPLES["export"])):
     """
     DEPRECATED: Use /v1/export instead.
     Export  endpoint.

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Circadian",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,27 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_timeline": {
+                  "summary": "Create a 10-week rollout plan",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "plan_timeline",
+                    "input": {
+                      "project_description": "BIOwerk launch hardening",
+                      "goals": [
+                        "Complete load test at 5x baseline",
+                        "Run failover rehearsal with database replicas",
+                        "Publish customer-facing status runbook"
+                      ],
+                      "duration_weeks": 10,
+                      "team_size": 6
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +119,57 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "task_assignment": {
+                  "summary": "Assign work by skills and workload",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "assign",
+                    "input": {
+                      "tasks": [
+                        {
+                          "id": "t1",
+                          "name": "Chaos drill",
+                          "priority": "high",
+                          "required_skills": [
+                            "sre",
+                            "observability"
+                          ]
+                        },
+                        {
+                          "id": "t2",
+                          "name": "Runbook review",
+                          "priority": "medium",
+                          "required_skills": [
+                            "ops",
+                            "docs"
+                          ]
+                        }
+                      ],
+                      "team_members": [
+                        {
+                          "name": "Alex",
+                          "skills": [
+                            "sre",
+                            "platform"
+                          ],
+                          "capacity": 0.5
+                        },
+                        {
+                          "name": "Priya",
+                          "skills": [
+                            "ops",
+                            "docs"
+                          ],
+                          "capacity": 0.8
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +209,46 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "project_status": {
+                  "summary": "Assess progress by week",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "track",
+                    "input": {
+                      "current_week": 4,
+                      "completed_tasks": [
+                        {
+                          "id": "t1",
+                          "name": "Chaos drill",
+                          "status": "done"
+                        }
+                      ],
+                      "in_progress_tasks": [
+                        {
+                          "id": "t2",
+                          "name": "Runbook review",
+                          "status": "in_progress"
+                        }
+                      ],
+                      "timeline": [
+                        {
+                          "id": "m1",
+                          "milestone": "Resilience tests",
+                          "week": 3
+                        },
+                        {
+                          "id": "m2",
+                          "milestone": "GA checklist",
+                          "week": 6
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -176,6 +288,41 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "weekly_reminders": {
+                  "summary": "Generate reminders from assignments",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "remind",
+                    "input": {
+                      "current_week": 5,
+                      "timeline": [
+                        {
+                          "id": "m2",
+                          "milestone": "GA checklist",
+                          "week": 6
+                        }
+                      ],
+                      "assignments": [
+                        {
+                          "task_id": "t2",
+                          "task_name": "Runbook review",
+                          "assignee": "Priya",
+                          "due_week": 5
+                        },
+                        {
+                          "task_id": "t3",
+                          "task_name": "Load test at 5x",
+                          "assignee": "Alex",
+                          "due_week": 6
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -215,6 +362,27 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "launch_timeline": {
+                  "summary": "Create a 10-week rollout plan",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "plan_timeline",
+                    "input": {
+                      "project_description": "BIOwerk launch hardening",
+                      "goals": [
+                        "Complete load test at 5x baseline",
+                        "Run failover rehearsal with database replicas",
+                        "Publish customer-facing status runbook"
+                      ],
+                      "duration_weeks": 10,
+                      "team_size": 6
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -241,7 +409,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/assign": {
@@ -254,6 +423,57 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "task_assignment": {
+                  "summary": "Assign work by skills and workload",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "assign",
+                    "input": {
+                      "tasks": [
+                        {
+                          "id": "t1",
+                          "name": "Chaos drill",
+                          "priority": "high",
+                          "required_skills": [
+                            "sre",
+                            "observability"
+                          ]
+                        },
+                        {
+                          "id": "t2",
+                          "name": "Runbook review",
+                          "priority": "medium",
+                          "required_skills": [
+                            "ops",
+                            "docs"
+                          ]
+                        }
+                      ],
+                      "team_members": [
+                        {
+                          "name": "Alex",
+                          "skills": [
+                            "sre",
+                            "platform"
+                          ],
+                          "capacity": 0.5
+                        },
+                        {
+                          "name": "Priya",
+                          "skills": [
+                            "ops",
+                            "docs"
+                          ],
+                          "capacity": 0.8
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -280,7 +500,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/track": {
@@ -293,6 +514,46 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "project_status": {
+                  "summary": "Assess progress by week",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "track",
+                    "input": {
+                      "current_week": 4,
+                      "completed_tasks": [
+                        {
+                          "id": "t1",
+                          "name": "Chaos drill",
+                          "status": "done"
+                        }
+                      ],
+                      "in_progress_tasks": [
+                        {
+                          "id": "t2",
+                          "name": "Runbook review",
+                          "status": "in_progress"
+                        }
+                      ],
+                      "timeline": [
+                        {
+                          "id": "m1",
+                          "milestone": "Resilience tests",
+                          "week": 3
+                        },
+                        {
+                          "id": "m2",
+                          "milestone": "GA checklist",
+                          "week": 6
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -319,7 +580,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/remind": {
@@ -332,6 +594,41 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "weekly_reminders": {
+                  "summary": "Generate reminders from assignments",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "circadian",
+                    "intent": "remind",
+                    "input": {
+                      "current_week": 5,
+                      "timeline": [
+                        {
+                          "id": "m2",
+                          "milestone": "GA checklist",
+                          "week": 6
+                        }
+                      ],
+                      "assignments": [
+                        {
+                          "task_id": "t2",
+                          "task_name": "Runbook review",
+                          "assignee": "Priya",
+                          "due_week": 5
+                        },
+                        {
+                          "task_id": "t3",
+                          "task_name": "Load test at 5x",
+                          "assignee": "Alex",
+                          "due_week": 6
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -358,7 +655,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },

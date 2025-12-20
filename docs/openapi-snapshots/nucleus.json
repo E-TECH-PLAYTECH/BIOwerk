@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Nucleus",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,31 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "execution_plan": {
+                  "summary": "Create an agent execution plan",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "plan",
+                    "input": {
+                      "goal": "Ship the launch readiness narrative by Friday",
+                      "requirements": [
+                        "Osteon outline",
+                        "Synapse deck draft",
+                        "Chaperone export"
+                      ],
+                      "available_agents": [
+                        "osteon",
+                        "synapse",
+                        "chaperone",
+                        "circadian"
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +123,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "intent_router": {
+                  "summary": "Route a user request to the right agent",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "route",
+                    "input": {
+                      "request": "Give me a storyboard and slides for the launch update",
+                      "context": "We already have a draft outline from Osteon."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +177,32 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "content_review": {
+                  "summary": "Review an artifact with explicit criteria",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "review",
+                    "input": {
+                      "content": {
+                        "sections": [
+                          {
+                            "title": "Risks",
+                            "text": "Traffic surge is a top risk."
+                          }
+                        ]
+                      },
+                      "criteria": [
+                        "quality",
+                        "risk_coverage",
+                        "actionability"
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -176,6 +242,38 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "final_handoff": {
+                  "summary": "Finalize a workflow handoff",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "finalize",
+                    "input": {
+                      "workflow_results": [
+                        {
+                          "agent": "osteon",
+                          "status": "ok",
+                          "artifact": {
+                            "outline": [
+                              "Intro",
+                              "Risks",
+                              "Actions"
+                            ]
+                          }
+                        },
+                        {
+                          "agent": "synapse",
+                          "status": "ok",
+                          "slides": 8
+                        }
+                      ],
+                      "goal": "Compile the Q4 readiness pack"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -215,6 +313,31 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "execution_plan": {
+                  "summary": "Create an agent execution plan",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "plan",
+                    "input": {
+                      "goal": "Ship the launch readiness narrative by Friday",
+                      "requirements": [
+                        "Osteon outline",
+                        "Synapse deck draft",
+                        "Chaperone export"
+                      ],
+                      "available_agents": [
+                        "osteon",
+                        "synapse",
+                        "chaperone",
+                        "circadian"
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -241,7 +364,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/route": {
@@ -254,6 +378,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "intent_router": {
+                  "summary": "Route a user request to the right agent",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "route",
+                    "input": {
+                      "request": "Give me a storyboard and slides for the launch update",
+                      "context": "We already have a draft outline from Osteon."
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -280,7 +419,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/review": {
@@ -293,6 +433,32 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "content_review": {
+                  "summary": "Review an artifact with explicit criteria",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "review",
+                    "input": {
+                      "content": {
+                        "sections": [
+                          {
+                            "title": "Risks",
+                            "text": "Traffic surge is a top risk."
+                          }
+                        ]
+                      },
+                      "criteria": [
+                        "quality",
+                        "risk_coverage",
+                        "actionability"
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -319,7 +485,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/finalize": {
@@ -332,6 +499,38 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "final_handoff": {
+                  "summary": "Finalize a workflow handoff",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "nucleus",
+                    "intent": "finalize",
+                    "input": {
+                      "workflow_results": [
+                        {
+                          "agent": "osteon",
+                          "status": "ok",
+                          "artifact": {
+                            "outline": [
+                              "Intro",
+                              "Risks",
+                              "Actions"
+                            ]
+                          }
+                        },
+                        {
+                          "agent": "synapse",
+                          "status": "ok",
+                          "slides": 8
+                        }
+                      ],
+                      "goal": "Compile the Q4 readiness pack"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -358,7 +557,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },

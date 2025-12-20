@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Chaperone",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,22 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "markdown_ingest": {
+                  "summary": "Ingest markdown notes",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "chaperone",
+                    "intent": "import_artifact",
+                    "input": {
+                      "format": "markdown",
+                      "artifact_type": "osteon",
+                      "content": "# Launch runbook\n- Validate metrics burn rates\n- Confirm rollback rehearsals completed"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +114,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "pdf_export": {
+                  "summary": "Export an osteon artifact to PDF",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "chaperone",
+                    "intent": "export_artifact",
+                    "input": {
+                      "format": "pdf",
+                      "artifact": {
+                        "kind": "osteon",
+                        "meta": {
+                          "title": "Launch Readiness Narrative"
+                        },
+                        "body": {
+                          "sections": [
+                            {
+                              "id": "intro",
+                              "title": "Executive summary",
+                              "text": "BIOwerk is ready for launch."
+                            },
+                            {
+                              "id": "risks",
+                              "title": "Risks",
+                              "text": "Traffic spikes, database lag"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +187,22 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "markdown_ingest": {
+                  "summary": "Ingest markdown notes",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "chaperone",
+                    "intent": "import_artifact",
+                    "input": {
+                      "format": "markdown",
+                      "artifact_type": "osteon",
+                      "content": "# Launch runbook\n- Validate metrics burn rates\n- Confirm rollback rehearsals completed"
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -163,7 +229,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/export_artifact": {
@@ -176,6 +243,40 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "pdf_export": {
+                  "summary": "Export an osteon artifact to PDF",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "chaperone",
+                    "intent": "export_artifact",
+                    "input": {
+                      "format": "pdf",
+                      "artifact": {
+                        "kind": "osteon",
+                        "meta": {
+                          "title": "Launch Readiness Narrative"
+                        },
+                        "body": {
+                          "sections": [
+                            {
+                              "id": "intro",
+                              "title": "Executive summary",
+                              "text": "BIOwerk is ready for launch."
+                            },
+                            {
+                              "id": "risks",
+                              "title": "Risks",
+                              "text": "Traffic spikes, database lag"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -202,7 +303,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from matrix.models import Msg, Reply
 from matrix.observability import setup_instrumentation
 from matrix.utils import state_hash
@@ -6,6 +6,7 @@ from matrix.logging_config import setup_logging, log_request, log_response, log_
 from matrix.errors import InvalidInputError, ValidationError, create_error_response
 from matrix.llm_client import llm_client
 from matrix.database import get_session_manager
+from matrix.openapi_examples import build_msg_example, build_request_body_examples
 from matrix.api_models import (
     OutlineRequest,
     DraftRequest,
@@ -18,7 +19,7 @@ from pydantic import ValidationError as PydanticValidationError
 import time
 import json
 
-app = FastAPI(title="Osteon")
+app = FastAPI(title="Osteon", version="1.0.0")
 setup_instrumentation(app, service_name="osteon", service_version="1.0.0")
 setup_validation_middleware(app)
 logger = setup_logging("osteon")
@@ -30,6 +31,87 @@ setup_health_endpoints(app, service_name="osteon", version="1.0.0")
 # Redis-based session manager for persistent state across requests
 # Uses 1-hour TTL for document generation workflows
 session_mgr = get_session_manager("default")
+
+OSTEON_EXAMPLES = {
+    "outline": {
+        "launch_brief": build_msg_example(
+            target="osteon",
+            intent="outline",
+            summary="Outline a reliability one-pager",
+            description="Shows the minimal payload needed to seed an outline with topic and context.",
+            input_payload={
+                "goal": "Outline a one-pager on platform reliability",
+                "topic": "Reliability narrative for Q4 launch",
+                "context": "Audience is the SRE steering group. Focus on uptime and rollback drills.",
+            },
+        )
+    },
+    "draft": {
+        "section_draft": build_msg_example(
+            target="osteon",
+            intent="draft",
+            summary="Draft a mitigation section",
+            description="Generates prose for a specific section and outline.",
+            input_payload={
+                "goal": "Produce a launch readiness brief",
+                "section_title": "Risk mitigation and contingencies",
+                "outline": [
+                    "Executive summary",
+                    "Architecture readiness",
+                    "Risk mitigation and contingencies",
+                    "Operational playbooks",
+                ],
+                "context": "Highlight rollback rehearsals and database failover coverage.",
+            },
+        )
+    },
+    "edit": {
+        "tighten_copy": build_msg_example(
+            target="osteon",
+            intent="edit",
+            summary="Improve launch messaging",
+            input_payload={
+                "text": "We think the platform should be okay for launch, teams tested most things.",
+                "feedback": "Make the tone assertive and crisp. Emphasize verified readiness signals.",
+                "edit_type": "improve",
+            },
+        )
+    },
+    "summarize": {
+        "executive_summary": build_msg_example(
+            target="osteon",
+            intent="summarize",
+            summary="Condense detailed notes",
+            input_payload={
+                "text": (
+                    "Engineering completed chaos drills across regions and restored service "
+                    "within SLO. Observability burn rates are green for the last 30 days."
+                ),
+                "max_length": "short",
+            },
+        )
+    },
+    "export": {
+        "final_artifact": build_msg_example(
+            target="osteon",
+            intent="export",
+            summary="Export a finished narrative",
+            description="Includes table-of-contents metadata to make the artifact discoverable.",
+            input_payload={
+                "title": "Launch Readiness Narrative",
+                "sections": [
+                    {"id": "intro", "title": "Executive summary", "text": "BIOwerk is ready for Q4 launch."},
+                    {"id": "ops", "title": "Operational excellence", "text": "Runbooks rehearsed and on-call staffed."},
+                ],
+                "metadata": {"toc": ["Executive summary", "Operational excellence"], "author": "release-manager@example.com"},
+            },
+        )
+    },
+}
+
+OSTEON_REQUEST_BODIES = {
+    name: build_request_body_examples(examples) for name, examples in OSTEON_EXAMPLES.items()
+}
 
 # ============================================================================
 # Internal Handler Functions
@@ -340,28 +422,28 @@ async def _export_handler(msg: Msg) -> Reply:
 # API v1 Endpoints
 # ============================================================================
 
-@app.post("/v1/outline", response_model=Reply)
-async def outline_v1(msg: Msg):
+@app.post("/v1/outline", response_model=Reply, openapi_extra=OSTEON_REQUEST_BODIES["outline"])
+async def outline_v1(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["outline"])):
     """Generate a structured outline for a document based on the goal/topic (API v1)."""
     return await _outline_handler(msg)
 
-@app.post("/v1/draft", response_model=Reply)
-async def draft_v1(msg: Msg):
+@app.post("/v1/draft", response_model=Reply, openapi_extra=OSTEON_REQUEST_BODIES["draft"])
+async def draft_v1(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["draft"])):
     """Generate draft content for sections (API v1)."""
     return await _draft_handler(msg)
 
-@app.post("/v1/edit", response_model=Reply)
-async def edit_v1(msg: Msg):
+@app.post("/v1/edit", response_model=Reply, openapi_extra=OSTEON_REQUEST_BODIES["edit"])
+async def edit_v1(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["edit"])):
     """Edit and improve content based on feedback (API v1)."""
     return await _edit_handler(msg)
 
-@app.post("/v1/summarize", response_model=Reply)
-async def summarize_v1(msg: Msg):
+@app.post("/v1/summarize", response_model=Reply, openapi_extra=OSTEON_REQUEST_BODIES["summarize"])
+async def summarize_v1(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["summarize"])):
     """Summarize content (API v1)."""
     return await _summarize_handler(msg)
 
-@app.post("/v1/export", response_model=Reply)
-async def export_v1(msg: Msg):
+@app.post("/v1/export", response_model=Reply, openapi_extra=OSTEON_REQUEST_BODIES["export"])
+async def export_v1(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["export"])):
     """Export the complete artifact with all sections (API v1)."""
     return await _export_handler(msg)
 
@@ -369,8 +451,8 @@ async def export_v1(msg: Msg):
 # Legacy Endpoints (Backward Compatibility)
 # ============================================================================
 
-@app.post("/outline", response_model=Reply)
-async def outline_legacy(msg: Msg):
+@app.post("/outline", response_model=Reply, deprecated=True, openapi_extra=OSTEON_REQUEST_BODIES["outline"])
+async def outline_legacy(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["outline"])):
     """
     DEPRECATED: Use /v1/outline instead.
     Generate a structured outline for a document based on the goal/topic.
@@ -378,8 +460,8 @@ async def outline_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /outline used. Please migrate to /v1/outline")
     return await _outline_handler(msg)
 
-@app.post("/draft", response_model=Reply)
-async def draft_legacy(msg: Msg):
+@app.post("/draft", response_model=Reply, deprecated=True, openapi_extra=OSTEON_REQUEST_BODIES["draft"])
+async def draft_legacy(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["draft"])):
     """
     DEPRECATED: Use /v1/draft instead.
     Generate draft content for sections.
@@ -387,8 +469,8 @@ async def draft_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /draft used. Please migrate to /v1/draft")
     return await _draft_handler(msg)
 
-@app.post("/edit", response_model=Reply)
-async def edit_legacy(msg: Msg):
+@app.post("/edit", response_model=Reply, deprecated=True, openapi_extra=OSTEON_REQUEST_BODIES["edit"])
+async def edit_legacy(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["edit"])):
     """
     DEPRECATED: Use /v1/edit instead.
     Edit and improve content based on feedback.
@@ -396,8 +478,8 @@ async def edit_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /edit used. Please migrate to /v1/edit")
     return await _edit_handler(msg)
 
-@app.post("/summarize", response_model=Reply)
-async def summarize_legacy(msg: Msg):
+@app.post("/summarize", response_model=Reply, deprecated=True, openapi_extra=OSTEON_REQUEST_BODIES["summarize"])
+async def summarize_legacy(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["summarize"])):
     """
     DEPRECATED: Use /v1/summarize instead.
     Summarize content.
@@ -405,8 +487,8 @@ async def summarize_legacy(msg: Msg):
     logger.warning("Deprecated endpoint /summarize used. Please migrate to /v1/summarize")
     return await _summarize_handler(msg)
 
-@app.post("/export", response_model=Reply)
-async def export_legacy(msg: Msg):
+@app.post("/export", response_model=Reply, deprecated=True, openapi_extra=OSTEON_REQUEST_BODIES["export"])
+async def export_legacy(msg: Msg = Body(..., examples=OSTEON_EXAMPLES["export"])):
     """
     DEPRECATED: Use /v1/export instead.
     Export the complete artifact with all sections.

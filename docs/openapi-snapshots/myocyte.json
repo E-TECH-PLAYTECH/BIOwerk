@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Myocyte",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
   "paths": {
     "/health": {
@@ -59,6 +59,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "csv_ingest": {
+                  "summary": "Parse a pasted CSV extract",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "ingest_table",
+                    "input": {
+                      "raw_data": "region,revenue,expenses\nNA,120000,45000\nEU,98000,41000",
+                      "tables": []
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -98,6 +113,57 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "apply_formulas": {
+                  "summary": "Calculate gross margin and growth",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "formula_eval",
+                    "input": {
+                      "tables": [
+                        {
+                          "id": "rev-1",
+                          "name": "Monthly Revenue",
+                          "headers": [
+                            "month",
+                            "revenue",
+                            "expenses"
+                          ],
+                          "rows": [
+                            [
+                              "Jan",
+                              120000,
+                              45000
+                            ],
+                            [
+                              "Feb",
+                              135000,
+                              47000
+                            ],
+                            [
+                              "Mar",
+                              150000,
+                              50000
+                            ]
+                          ]
+                        }
+                      ],
+                      "formulas": [
+                        {
+                          "name": "gross_margin",
+                          "expression": "revenue - expenses"
+                        },
+                        {
+                          "name": "growth_rate",
+                          "expression": "(revenue / lag(revenue)) - 1"
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -137,6 +203,45 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "forecast_pipeline": {
+                  "summary": "Generate a revenue forecast",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "model_forecast",
+                    "input": {
+                      "tables": [
+                        {
+                          "id": "rev-1",
+                          "name": "ARR by month",
+                          "headers": [
+                            "month",
+                            "arr"
+                          ],
+                          "rows": [
+                            [
+                              "Jan",
+                              220000
+                            ],
+                            [
+                              "Feb",
+                              230000
+                            ],
+                            [
+                              "Mar",
+                              245000
+                            ]
+                          ]
+                        }
+                      ],
+                      "forecast_type": "trend",
+                      "periods": 4
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -176,6 +281,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "bundle_artifact": {
+                  "summary": "Export calculated tables with metadata",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "export",
+                    "input": {
+                      "title": "Revenue Analysis Pack",
+                      "metadata": {
+                        "tables": [
+                          {
+                            "id": "rev-1",
+                            "name": "ARR by month"
+                          }
+                        ],
+                        "formulas": [
+                          "gross_margin",
+                          "growth_rate"
+                        ],
+                        "charts": [
+                          "arr_trend",
+                          "margin_by_region"
+                        ]
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -215,6 +350,21 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "csv_ingest": {
+                  "summary": "Parse a pasted CSV extract",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "ingest_table",
+                    "input": {
+                      "raw_data": "region,revenue,expenses\nNA,120000,45000\nEU,98000,41000",
+                      "tables": []
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -241,7 +391,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/formula_eval": {
@@ -254,6 +405,57 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "apply_formulas": {
+                  "summary": "Calculate gross margin and growth",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "formula_eval",
+                    "input": {
+                      "tables": [
+                        {
+                          "id": "rev-1",
+                          "name": "Monthly Revenue",
+                          "headers": [
+                            "month",
+                            "revenue",
+                            "expenses"
+                          ],
+                          "rows": [
+                            [
+                              "Jan",
+                              120000,
+                              45000
+                            ],
+                            [
+                              "Feb",
+                              135000,
+                              47000
+                            ],
+                            [
+                              "Mar",
+                              150000,
+                              50000
+                            ]
+                          ]
+                        }
+                      ],
+                      "formulas": [
+                        {
+                          "name": "gross_margin",
+                          "expression": "revenue - expenses"
+                        },
+                        {
+                          "name": "growth_rate",
+                          "expression": "(revenue / lag(revenue)) - 1"
+                        }
+                      ]
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -280,7 +482,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/model_forecast": {
@@ -293,6 +496,45 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "forecast_pipeline": {
+                  "summary": "Generate a revenue forecast",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "model_forecast",
+                    "input": {
+                      "tables": [
+                        {
+                          "id": "rev-1",
+                          "name": "ARR by month",
+                          "headers": [
+                            "month",
+                            "arr"
+                          ],
+                          "rows": [
+                            [
+                              "Jan",
+                              220000
+                            ],
+                            [
+                              "Feb",
+                              230000
+                            ],
+                            [
+                              "Mar",
+                              245000
+                            ]
+                          ]
+                        }
+                      ],
+                      "forecast_type": "trend",
+                      "periods": 4
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -319,7 +561,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/export": {
@@ -332,6 +575,36 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Msg"
+              },
+              "examples": {
+                "bundle_artifact": {
+                  "summary": "Export calculated tables with metadata",
+                  "value": {
+                    "origin": "swagger-ui",
+                    "target": "myocyte",
+                    "intent": "export",
+                    "input": {
+                      "title": "Revenue Analysis Pack",
+                      "metadata": {
+                        "tables": [
+                          {
+                            "id": "rev-1",
+                            "name": "ARR by month"
+                          }
+                        ],
+                        "formulas": [
+                          "gross_margin",
+                          "growth_rate"
+                        ],
+                        "charts": [
+                          "arr_trend",
+                          "margin_by_region"
+                        ]
+                      }
+                    },
+                    "api_version": "v1"
+                  }
+                }
               }
             }
           },
@@ -358,7 +631,8 @@
               }
             }
           }
-        }
+        },
+        "deprecated": true
       }
     }
   },
