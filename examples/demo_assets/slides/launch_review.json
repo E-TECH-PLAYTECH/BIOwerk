@@ -1,0 +1,42 @@
+{
+  "title": "Mesh Launch Review",
+  "audience": "Executive steering group",
+  "slides": [
+    {
+      "id": "intro",
+      "title": "Why Mesh Now",
+      "bullets": [
+        "Unified entry point for all agents keeps routing and policy consistent",
+        "Audit coverage extends to documents, sheets, and slide generations",
+        "Pilot shows reduced lead time to publish compliant artifacts"
+      ]
+    },
+    {
+      "id": "reliability",
+      "title": "Reliability Snapshot",
+      "bullets": [
+        "Bulkheads and rate limits isolate noisy neighbors",
+        "SLO guardrails: availability 99.95%, p95 latency under 900 ms",
+        "Chaos drills validated circuit breaker recovery"
+      ]
+    },
+    {
+      "id": "governance",
+      "title": "Governance Signals",
+      "bullets": [
+        "Redaction policy enforced before export",
+        "Artifacts stored with provenance hashes",
+        "Audit trails stream to SIEM with agent labels"
+      ]
+    },
+    {
+      "id": "next_steps",
+      "title": "Next Steps",
+      "bullets": [
+        "Expand pilot to cross-region teams with synthetic data only",
+        "Automate dashboard refreshes from sanitized sheets",
+        "Finalize executive brief with osteon + synapse exports"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "BIOwerk Mesh Demo Assets",
+  "description": "Sanitized sample assets that mirror document, sheet, and slide workloads for Mesh agents.",
+  "workloads": [
+    {
+      "kind": "docs",
+      "path": "docs/readiness_brief.md",
+      "target_agent": "osteon",
+      "expected_use": "Feed to osteon draft/edit/summarize endpoints to build the executive brief.",
+      "expected_output": "A structured outline and refined draft with provenance hashes returned by osteon."
+    },
+    {
+      "kind": "sheets",
+      "path": "sheets/reliability_metrics.csv",
+      "target_agent": "myocyte",
+      "expected_use": "Pass to myocyte ingest_table for metric analysis and anomaly spotting.",
+      "expected_output": "Normalized tables suitable for downstream visualization and governance export."
+    },
+    {
+      "kind": "slides",
+      "path": "slides/launch_review.json",
+      "target_agent": "synapse",
+      "expected_use": "Provide as context to synapse storyboard or slide-generation routes.",
+      "expected_output": "Slide outlines and visual recommendations keyed to the sanitized launch review narrative."
+    }
+  ]
+}
