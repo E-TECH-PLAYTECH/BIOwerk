@@ -263,6 +263,120 @@ The core suite operates entirely on native formats.
 
 Production deployments should plan for consistent observability and disaster recovery. The suite’s FastAPI services run as discrete containers, so the patterns below apply uniformly across Mesh and every agent.
 
+### Production overrides and rotation schedule
+
+- **Secrets are mandatory** – Replace the development placeholders for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY` before any staging or production rollout. The applications will refuse to start when defaults are detected in non-development environments. Generate 64+ byte secrets per environment and store them in a secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager) instead of `.env`.
+- **TLS is mandatory** – Set `TLS_ENABLED=true` everywhere outside local development and provide CA-signed certificates. In Docker Compose mount them at `./certs` or `/etc/biowerk/certs` with `TLS_CERT_FILE` and `TLS_KEY_FILE` pointing to the mounted paths. In Kubernetes, supply a `tls-certs` secret (or cert-manager `Certificate`) that backs the Mesh deployment volume.
+- **Disable dev-only behaviors in production** – Run with `ENVIRONMENT=production`, `REQUIRE_AUTH=true`, and avoid exposing the unencrypted 8080 port on public interfaces. Do not deploy any `--reload` settings or mock/demo credentials. Keep rate limiting enabled (defaults are on) and avoid the legacy unversioned endpoints when fronting the stack with an ingress.
+- **Rotation cadence (minimum)** – JWT and API gateway secrets: 90 days. Database credentials and Redis passwords: 180 days. TLS certificates: 60–90 days (Let’s Encrypt naturally enforces 90 days). Encryption master key: 180 days with dual-running windows and re-encryption of stored payloads. Rotate immediately after any incident, and document rotations in your runbook.
+- **Audit the overrides** – At deployment time, assert that `ENVIRONMENT=production`, `TLS_ENABLED=true`, `REQUIRE_AUTH=true`, and that the secret material being read differs from defaults. Pair this with an automated check that the TLS certificate expiration is >30 days to avoid surprise outages.
+
+#### Minimal hardened Docker Compose profile
+
+Use an override file to force production settings and ensure secrets/certs are mounted read-only. The example below trims to core services while keeping HTTPS and authentication enforced:
+
+```yaml
+# docker-compose.prod.override.yml
+services:
+  mesh:
+    profiles: ["prod-minimal"]
+    environment:
+      ENVIRONMENT: production
+      REQUIRE_AUTH: "true"
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /etc/biowerk/certs/tls.crt
+      TLS_KEY_FILE: /etc/biowerk/certs/tls.key
+    ports:
+      - "8443:8443"   # expose only TLS
+    volumes:
+      - /etc/biowerk/certs:/etc/biowerk/certs:ro
+    secrets:
+      - jwt_secret_key
+      - encryption_master_key
+  osteon:
+    profiles: ["prod-minimal"]
+  myocyte:
+    profiles: ["prod-minimal"]
+  synapse:
+    profiles: ["prod-minimal"]
+  circadian:
+    profiles: ["prod-minimal"]
+  nucleus:
+    profiles: ["prod-minimal"]
+  chaperone:
+    profiles: ["prod-minimal"]
+  gdpr:
+    profiles: ["prod-minimal"]
+    environment:
+      ENCRYPTION_KEY_ROTATION_DAYS: 90
+
+secrets:
+  jwt_secret_key:
+    file: ./secrets/jwt_secret_key
+  encryption_master_key:
+    file: ./secrets/encryption_master_key
+```
+
+Run with `docker compose --profile prod-minimal -f docker-compose.yml -f docker-compose.prod.override.yml up -d` after placing strong secret material in `./secrets/`. This keeps dev-only services disabled, removes plaintext HTTP exposure, and mounts keys as read-only files.
+
+#### Minimal hardened Kubernetes overlay
+
+For clusters, create a lightweight overlay to force HTTPS and auth while pulling secrets from Kubernetes objects or an external secret operator:
+
+```yaml
+# k8s/overlays/production-minimal/kustomization.yaml
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: ConfigMap
+      name: app-config
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: app-config
+        namespace: biowerk
+      data:
+        environment: "production"
+        tls_enabled: "true"
+        require_auth: "true"
+  - target:
+      kind: Deployment
+      name: mesh
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mesh
+        namespace: biowerk
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: tls-certs
+                secret:
+                  secretName: tls-certs
+                  optional: false
+            containers:
+              - name: mesh
+                env:
+                  - name: JWT_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: app-secrets
+                        key: jwt_secret_key
+                  - name: REQUIRE_AUTH
+                    value: "true"
+                  - name: TLS_ENABLED
+                    value: "true"
+                ports:
+                  - containerPort: 8443
+                    name: https
+```
+
+Apply with `kubectl apply -k k8s/overlays/production-minimal`. Combine with cert-manager `Certificate` objects or a pre-provisioned `tls-certs` secret so Mesh only serves HTTPS. Keep ingress annotations that redirect HTTP→HTTPS and remove any dev-only deployments or init containers.
+
 ### Log aggregation
 
 - **Structured logs** – Each container writes access/application logs to STDOUT. To guarantee structured JSON, extend the container command with a custom logging config:
