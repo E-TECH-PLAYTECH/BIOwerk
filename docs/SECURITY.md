@@ -93,13 +93,17 @@ docker run -v $(pwd):/zap/wrk:rw \
 - **Upstream monitoring**
   - Enable Dependabot or Renovate for Python and JavaScript ecosystems; require security update PRs to include CVE IDs and remediation notes.
   - Subscribe to vendor advisories for Redis, Postgres, Nginx, and OS base images; mirror feeds into the alert channel.
+- **SBOM & advisory automation**
+  - GitHub Actions generates a CycloneDX SBOM on every pull request and on the nightly security schedule; Trivy scans the SBOM to surface upstream advisories across Python packages and container layers.
+  - SBOM artifacts and SARIF vulnerability findings are uploaded as build artifacts and to GitHub code scanning for centralized triage.
+  - Security notifications for dependency, container, SBOM, and secrets scans post to the `#security` channel via the `SECURITY_SLACK_WEBHOOK` secret.
 - **Automated alerting**
   - Nightly `pip-audit`/`safety` runs with Slack/email notifications summarizing new CVEs and affected packages.
   - Container scanning (Trivy) on every build; fail CI on new HIGH/CRITICAL issues unless explicitly waived with an expiry.
   - Track OSV and NVD feeds; store triage decisions in the issue tracker with ownership and due dates.
 - **Response SLOs**
-  - CRITICAL: patch within 24 hours; HOTFIX release allowed.
-  - HIGH: patch within 7 days; backport if the previous minor release is supported.
+  - CRITICAL: patch within **24 hours**; HOTFIX release allowed. Escalate immediately in `#security` and create an incident with a mitigation plan before end-of-day UTC.
+  - HIGH: patch within **7 days**; backport if the previous minor release is supported. If a patch is not available within 5 days, deploy a compensating control and document the waiver with an expiry date.
   - MEDIUM/LOW: schedule within the next sprint; document compensating controls if deferring.
 - **Playbook**
   - Create an incident in the `Security` board with CVE, affected component, and proposed mitigation.
