@@ -10,7 +10,7 @@ This module provides AES-256-GCM encryption for data at rest with:
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 from typing import Optional, Dict, Any, Tuple
 import secrets
@@ -102,7 +102,7 @@ class EncryptionService:
         Returns:
             32-byte derived key
         """
-        kdf = PBKDF2(
+        kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
             salt=salt,

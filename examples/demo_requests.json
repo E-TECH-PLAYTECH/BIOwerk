@@ -1,0 +1,100 @@
+{
+  "mesh_url": "http://localhost:8080",
+  "requests": [
+    {
+      "label": "nucleus plan",
+      "path": "/v1/nucleus/plan",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "nucleus",
+        "intent": "plan",
+        "input": {
+          "goal": "Plan BIOwerk launch readiness for Q4",
+          "requirements": [
+            "updated OpenAPI snapshots",
+            "desktop launcher validation"
+          ],
+          "available_agents": [
+            "osteon",
+            "myocyte",
+            "synapse",
+            "circadian",
+            "chaperone"
+          ]
+        }
+      }
+    },
+    {
+      "label": "osteon outline",
+      "path": "/v1/osteon/outline",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "osteon",
+        "intent": "outline",
+        "input": {
+          "goal": "Produce a readiness brief for the BIOwerk suite",
+          "context": "Emphasize resilience, accessibility, and i18n"
+        }
+      }
+    },
+    {
+      "label": "myocyte ingest",
+      "path": "/v1/myocyte/ingest_table",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "myocyte",
+        "intent": "ingest_table",
+        "input": {
+          "raw_data": "metric,value\nthroughput,125\nerror_rate,0.3",
+          "tables": []
+        }
+      }
+    },
+    {
+      "label": "synapse storyboard",
+      "path": "/v1/synapse/storyboard",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "synapse",
+        "intent": "storyboard",
+        "input": {
+          "topic": "BIOwerk launch review",
+          "audience": "executive",
+          "num_slides": 5
+        }
+      }
+    },
+    {
+      "label": "circadian timeline",
+      "path": "/v1/circadian/plan_timeline",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "circadian",
+        "intent": "plan_timeline",
+        "input": {
+          "project_description": "Mesh production rollout",
+          "duration_weeks": 8,
+          "team_size": 6,
+          "goals": [
+            "complete chaos testing",
+            "finish rate-limit fuzzing"
+          ]
+        }
+      }
+    },
+    {
+      "label": "chaperone import",
+      "path": "/v1/chaperone/import_artifact",
+      "payload": {
+        "origin": "demo-cli",
+        "target": "chaperone",
+        "intent": "import_artifact",
+        "input": {
+          "format": "markdown",
+          "artifact_type": "osteon",
+          "content": "# BIOwerk Notes\n- OpenAPI snapshots refreshed\n- Demo data ready"
+        }
+      }
+    }
+  ]
+}
