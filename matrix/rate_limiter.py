@@ -311,9 +311,12 @@ class RateLimiter:
                 "retry_after": 0,
             }
 
+        except RateLimitExceeded:
+            # Preserve intentional enforcement signals
+            raise
         except Exception as e:
             logger.error(f"Token bucket rate limit error: {e}")
-            # Fail open on errors (allow request but log)
+            # Fail open on unexpected errors (allow request but log)
             return {
                 "allowed": True,
                 "remaining": self.requests,

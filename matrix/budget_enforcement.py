@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, or_
 from dateutil.relativedelta import relativedelta
 
 from matrix.db_models import BudgetConfig, TokenUsage, User, Project
