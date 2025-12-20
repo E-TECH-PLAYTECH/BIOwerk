@@ -14,6 +14,7 @@ This guide provides a single place to install, start, observe, and maintain BIOw
 BIOwerk ships development-only defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MASTER_KEY`. The application now refuses to start in **staging** or **production** when those defaults are present.
 
 - **Development safety net**: when `ENVIRONMENT` is `development`, `dev`, or `local`, startup will log a warning instead of failing, so you notice the defaults before promoting the build.
+- **Rotation schedule**: rotate JWT signing keys at least every 90 days and immediately after any incident. Rotate the encryption master key every 180 days (with dual-running windows and re-encryption for stored payloads). Rotate database and cache credentials every 180 days. Keep TLS certificates on 60–90-day lifetimes (Let’s Encrypt defaults to 90 days); alert if expiration is within 30 days.
 - **Local/Docker**: place secrets in `.env` or export them before running the control script or docker-compose:
   ```bash
   export JWT_SECRET_KEY=$(openssl rand -hex 64)
@@ -28,6 +29,113 @@ BIOwerk ships development-only defaults for `JWT_SECRET_KEY` and `ENCRYPTION_MAS
   ```
   The Helm chart maps `.Values.environment` to the `ENVIRONMENT` setting (default: `production`) and reads the secrets above as mounted environment variables; avoid embedding secrets directly in `values.yaml`.
   For sealed secrets or external secret stores, map the same keys (`jwt_secret_key`, `encryption_master_key`) into the environment of the services.
+  Enforce `TLS_ENABLED=true`, `REQUIRE_AUTH=true`, and ensure the mesh only advertises the HTTPS listener.
+
+## Minimal Production Profiles
+
+### Hardened Docker Compose override
+
+Use a production override file to strip dev-only behavior (no hot-reload, no plaintext HTTP) and mount secrets/certs read-only. Run with `docker compose --profile prod-minimal -f docker-compose.yml -f docker-compose.prod.override.yml up -d`.
+
+```yaml
+# docker-compose.prod.override.yml
+services:
+  mesh:
+    profiles: ["prod-minimal"]
+    environment:
+      ENVIRONMENT: production
+      REQUIRE_AUTH: "true"
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: /etc/biowerk/certs/tls.crt
+      TLS_KEY_FILE: /etc/biowerk/certs/tls.key
+    ports:
+      - "8443:8443"   # expose only TLS
+    volumes:
+      - /etc/biowerk/certs:/etc/biowerk/certs:ro
+    secrets:
+      - jwt_secret_key
+      - encryption_master_key
+  osteon:
+    profiles: ["prod-minimal"]
+  myocyte:
+    profiles: ["prod-minimal"]
+  synapse:
+    profiles: ["prod-minimal"]
+  circadian:
+    profiles: ["prod-minimal"]
+  nucleus:
+    profiles: ["prod-minimal"]
+  chaperone:
+    profiles: ["prod-minimal"]
+  gdpr:
+    profiles: ["prod-minimal"]
+    environment:
+      ENCRYPTION_KEY_ROTATION_DAYS: 90
+
+secrets:
+  jwt_secret_key:
+    file: ./secrets/jwt_secret_key
+  encryption_master_key:
+    file: ./secrets/encryption_master_key
+```
+
+### Hardened Kubernetes overlay
+
+For clusters, add a slim overlay that forces HTTPS and authentication, removes dev toggles, and depends on real secrets:
+
+```yaml
+# k8s/overlays/production-minimal/kustomization.yaml
+resources:
+  - ../../base
+patches:
+  - target:
+      kind: ConfigMap
+      name: app-config
+    patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: app-config
+        namespace: biowerk
+      data:
+        environment: "production"
+        tls_enabled: "true"
+        require_auth: "true"
+  - target:
+      kind: Deployment
+      name: mesh
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mesh
+        namespace: biowerk
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: tls-certs
+                secret:
+                  secretName: tls-certs
+                  optional: false
+            containers:
+              - name: mesh
+                env:
+                  - name: JWT_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: app-secrets
+                        key: jwt_secret_key
+                  - name: REQUIRE_AUTH
+                    value: "true"
+                  - name: TLS_ENABLED
+                    value: "true"
+                ports:
+                  - containerPort: 8443
+                    name: https
+```
+
+Apply with `kubectl apply -k k8s/overlays/production-minimal` after supplying `app-secrets` and `tls-certs` via Sealed Secrets, External Secrets Operator, or your cloud KMS-backed controller. Keep ingress annotations that redirect HTTP→HTTPS and disable any dev-only init containers, demo credentials, or mock data seeds.
 
 ## Unified Control Script
 
