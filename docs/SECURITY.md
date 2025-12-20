@@ -88,6 +88,24 @@ docker run -v $(pwd):/zap/wrk:rw \
 5. **Verification**: Re-scan to confirm fix
 6. **Documentation**: Update security advisory
 
+### Continuous Security Response & CVE Alerts
+
+- **Upstream monitoring**
+  - Enable Dependabot or Renovate for Python and JavaScript ecosystems; require security update PRs to include CVE IDs and remediation notes.
+  - Subscribe to vendor advisories for Redis, Postgres, Nginx, and OS base images; mirror feeds into the alert channel.
+- **Automated alerting**
+  - Nightly `pip-audit`/`safety` runs with Slack/email notifications summarizing new CVEs and affected packages.
+  - Container scanning (Trivy) on every build; fail CI on new HIGH/CRITICAL issues unless explicitly waived with an expiry.
+  - Track OSV and NVD feeds; store triage decisions in the issue tracker with ownership and due dates.
+- **Response SLOs**
+  - CRITICAL: patch within 24 hours; HOTFIX release allowed.
+  - HIGH: patch within 7 days; backport if the previous minor release is supported.
+  - MEDIUM/LOW: schedule within the next sprint; document compensating controls if deferring.
+- **Playbook**
+  - Create an incident in the `Security` board with CVE, affected component, and proposed mitigation.
+  - Run targeted regression and load tests (`make test`, `make security`, and a subset of `docs/LOAD_AND_CHAOS_TESTING.md` scenarios) before promoting to production.
+  - Update release notes and notify operators when patches change runtime dependencies or configurations.
+
 ### 4. Security Features
 
 #### Authentication & Authorization

@@ -10,6 +10,11 @@ Thank you for your interest in contributing to BIOwerk! This document provides g
 - [Testing](#testing)
 - [Commit Guidelines](#commit-guidelines)
 - [Pull Request Process](#pull-request-process)
+- [Plugins and Extensions](#plugins-and-extensions)
+- [Code Style Guidelines](#code-style-guidelines)
+- [Additional Resources](#additional-resources)
+- [Getting Help](#getting-help)
+- [License](#license)
 
 ## Development Setup
 
@@ -321,6 +326,37 @@ Before merging, your PR must:
 4. **Feedback**: Address review comments and update PR
 5. **Approval**: Once approved, maintainers will merge
 
+## Plugins and Extensions
+
+BIOwerk encourages a modular, secure plugin and extension ecosystem. Use this checklist to keep plugins production-ready:
+
+### Design Principles
+- Prefer **stateless adapters** that delegate heavy work to existing agents (Mesh routes everything under `/v1/{agent}/{endpoint}`).
+- Keep APIs **versioned**—plugins must declare the mesh API version they target and include contract tests against the generated OpenAPI snapshots (`docs/openapi-snapshots/`).
+- Default to **least privilege**—request only the scopes your extension needs and document them in the README.
+
+### Building Plugins/Extensions
+- Start from the demo payloads in `examples/demo_requests.json` and the helper script `examples/run_demo_requests.py` to understand message envelopes and validation.
+- Expose a clear entrypoint (`main.py` for Python, `index.ts` for JS) and surface health endpoints consistent with `matrix.health.setup_health_endpoints`.
+- Add **adapter-level validation** using the shared `matrix.api_models.GenericRequest` where possible; avoid bypassing mesh RBAC.
+
+### Packaging & Distribution
+- Publish artifacts with semantic versions; include the targeted BIOwerk release in your changelog (e.g., `compatible-with: 1.3.x`).
+- Provide signed artifacts or checksums for binaries and installers. Keep build scripts reproducible and document any platform-specific steps in `distribution/README.md`.
+- Include an **uninstall path** and rollback guidance for every distribution mechanism.
+
+### Security, Compliance, and Observability
+- Wire plugins into the existing audit trail (see `matrix/audit.py`) and emit structured events for privileged actions.
+- Register OTEL resource attributes (service name/version) if the extension emits traces or metrics; follow the patterns in `matrix/observability.py`.
+- Run `make security`, `make lint`, and targeted fuzz/load tests for your extension-specific endpoints. Document rate-limit behaviors using the template in `docs/API_RATE_LIMIT_TESTING.md`.
+
+### Review Checklist (attach to PRs)
+- [ ] Declared supported BIOwerk versions and mesh API version.
+- [ ] Added or updated OpenAPI snapshots via `python scripts/export_openapi_snapshots.py`.
+- [ ] Documented scopes/permissions and fail-closed behaviors.
+- [ ] Added dashboards/tooltips/help text for critical actions surfaced by the plugin.
+- [ ] Added chaos/load test notes and rollback plan.
+
 ## Code Style Guidelines
 
 ### Python Style
@@ -358,6 +394,9 @@ async def get_user_by_id(user_id: int) -> Optional[dict]:
 - [Conventional Commits](https://www.conventionalcommits.org/)
 - [pytest Documentation](https://docs.pytest.org/)
 - [FastAPI Best Practices](https://fastapi.tiangolo.com/tutorial/)
+- [OpenAPI Snapshots & Try-It Examples](docs/OPENAPI_AND_TRY_IT.md)
+- [Load & Chaos Testing Playbook](docs/LOAD_AND_CHAOS_TESTING.md)
+- [API Rate-Limit Testing Guide](docs/API_RATE_LIMIT_TESTING.md)
 
 ## Getting Help
 

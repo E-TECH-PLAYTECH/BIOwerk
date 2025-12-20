@@ -72,7 +72,7 @@ class Artifact(Base):
     version = Column(Integer, default=1, nullable=False)
     state_hash = Column(String(64), nullable=False, index=True)  # BLAKE3 hash
     mongo_id = Column(String(24), nullable=False, unique=True, index=True)  # Reference to MongoDB document
-    metadata = Column(JSON, nullable=True)  # Additional metadata
+    metadata_json = Column("metadata", JSON, nullable=True)  # Additional metadata (column name preserved)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
