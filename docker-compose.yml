@@ -120,6 +120,7 @@ services:
       - TLS_CERT_FILE=/app/certs/cert.pem
       - TLS_KEY_FILE=/app/certs/key.pem
       - TLS_MIN_VERSION=${TLS_MIN_VERSION:-TLSv1.2}
+      - JWT_SECRET_KEY_FILE=${JWT_SECRET_KEY_FILE:-}
       # Rate Limiting Configuration
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
       - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
@@ -307,6 +308,7 @@ services:
       - REDIS_HOST=redis
       # CRITICAL: Use KMS in production (AWS Secrets Manager, Azure Key Vault, etc.)
       - ENCRYPTION_MASTER_KEY=${ENCRYPTION_MASTER_KEY:?ENCRYPTION_MASTER_KEY is required - see .env.example}
+      - ENCRYPTION_MASTER_KEY_FILE=${ENCRYPTION_MASTER_KEY_FILE:-}
       - ENCRYPTION_KEY_ROTATION_DAYS=${ENCRYPTION_KEY_ROTATION_DAYS:-90}
       # GDPR Configuration
       - GDPR_EXPORT_BASE_PATH=/var/gdpr_exports

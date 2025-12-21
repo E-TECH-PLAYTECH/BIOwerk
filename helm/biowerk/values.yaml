@@ -11,6 +11,17 @@ global:
 # Environment
 environment: production
 
+security:
+  requireAuth: true
+  tlsEnabled: true
+  secrets:
+    jwt:
+      existingSecret: app-secrets
+      key: jwt_secret_key
+    encryption:
+      existingSecret: gdpr-secrets
+      key: encryption_master_key
+
 # Image configuration
 image:
   registry: docker.io
@@ -449,7 +460,7 @@ monitoringIngress:
 
 # Security
 tls:
-  enabled: false
+  enabled: true
   secretName: tls-certs
 
 # Pod Security

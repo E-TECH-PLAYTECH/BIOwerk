@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mesh
+  namespace: biowerk
+spec:
+  template:
+    spec:
+      containers:
+        - name: mesh
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: REQUIRE_AUTH
+              value: "true"
+            - name: TLS_ENABLED
+              value: "true"
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: tls-certs
+            optional: false

@@ -1,0 +1,108 @@
+version: "3.9"
+
+x-prod-profiles: &prod_profiles
+  profiles: ["prod-secure"]
+
+x-shared-prod-env: &shared_prod_env
+  ENVIRONMENT: production
+
+x-mesh-security-env: &mesh_security_env
+  <<: *shared_prod_env
+  REQUIRE_AUTH: "true"
+  TLS_ENABLED: "true"
+  TLS_CERT_FILE: /etc/biowerk/certs/tls.crt
+  TLS_KEY_FILE: /etc/biowerk/certs/tls.key
+  TLS_MIN_VERSION: TLSv1.2
+  JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+  ENCRYPTION_MASTER_KEY_FILE: /run/secrets/encryption_master_key
+
+x-agent-secret-env: &agent_secret_env
+  <<: *shared_prod_env
+  JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+
+services:
+  mesh:
+    <<: *prod_profiles
+    environment:
+      <<: *mesh_security_env
+    ports:
+      - "8443:8443"
+    secrets:
+      - source: jwt_secret_key
+        target: /run/secrets/jwt_secret_key
+      - source: encryption_master_key
+        target: /run/secrets/encryption_master_key
+      - source: mesh_tls_cert
+        target: /etc/biowerk/certs/tls.crt
+        mode: 0444
+      - source: mesh_tls_key
+        target: /etc/biowerk/certs/tls.key
+        mode: 0400
+
+  osteon:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  myocyte:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  synapse:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  circadian:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  nucleus:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  chaperone:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+    ports: []
+    secrets:
+      - jwt_secret_key
+
+  gdpr:
+    <<: *prod_profiles
+    environment:
+      <<: *agent_secret_env
+      ENCRYPTION_MASTER_KEY_FILE: /run/secrets/encryption_master_key
+    ports: []
+    secrets:
+      - jwt_secret_key
+      - encryption_master_key
+
+secrets:
+  jwt_secret_key:
+    external: true
+  encryption_master_key:
+    external: true
+  mesh_tls_cert:
+    external: true
+  mesh_tls_key:
+    external: true
