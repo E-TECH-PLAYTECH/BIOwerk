@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: biowerk
+data:
+  environment: "production"
+  tls_enabled: "true"
+  require_auth: "true"

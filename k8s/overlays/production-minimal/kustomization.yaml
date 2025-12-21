@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: biowerk
+
+resources:
+  - ../../base
+
+commonLabels:
+  environment: production
+  app.kubernetes.io/environment: production
+
+patches:
+  - path: patches/app-config.yaml
+    target:
+      kind: ConfigMap
+      name: app-config
+  - path: patches/mesh-deployment.yaml
+    target:
+      kind: Deployment
+      name: mesh
+  - path: patches/mesh-service.yaml
+    target:
+      kind: Service
+      name: mesh
+  - path: patches/gdpr-deployment.yaml
+    target:
+      kind: Deployment
+      name: gdpr

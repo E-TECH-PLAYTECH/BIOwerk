@@ -1,0 +1,18 @@
+name: Production Guardrails
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  prod-guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enforce production security defaults
+        run: bash scripts/validate_prod_security.sh

@@ -1,5 +1,7 @@
 """Configuration management using Pydantic Settings."""
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
 from pydantic import Field
@@ -27,6 +29,33 @@ def _emit_dev_secret_warning(secret_name: str) -> None:
         secret_name,
         secret_name.upper(),
     )
+
+
+def _load_secret_from_file(env_var: str) -> Optional[str]:
+    """
+    Load a secret from an accompanying *_FILE environment variable.
+
+    This enables Docker/Swarm/Kubernetes secret mounts without embedding
+    plaintext values in .env files.
+    """
+    file_var = f"{env_var}_FILE"
+    file_path = os.getenv(file_var)
+
+    if not file_path:
+        return None
+
+    path = Path(file_path)
+    if not path.is_file():
+        _logger.warning("Secret file %s referenced by %s not found", file_path, file_var)
+        return None
+
+    secret_value = path.read_text(encoding="utf-8").strip()
+    if not secret_value:
+        _logger.warning("Secret file %s referenced by %s is empty", file_path, file_var)
+        return None
+
+    os.environ[env_var] = secret_value
+    return secret_value
 
 
 class Settings(BaseSettings):
@@ -305,4 +334,7 @@ class Settings(BaseSettings):
 
 
 # Global settings instance
+for _secret_var in ("JWT_SECRET_KEY", "ENCRYPTION_MASTER_KEY"):
+    _load_secret_from_file(_secret_var)
+
 settings = Settings()
